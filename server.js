@@ -40,6 +40,10 @@ const resourceSchema = new mongoose.Schema(
 
 const Resource = mongoose.model("Resource", resourceSchema);
 
+// Root route - taaki browser mein kholne par kuch dikhe
+app.get("/", (req, res) => {
+  res.send("🚀 Student Resource Hub API is running!");
+});
 // ===== API ROUTES =====
 app.get("/api/resources", async (req, res) => {
   try {
