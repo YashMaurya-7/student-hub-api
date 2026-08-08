@@ -10,7 +10,7 @@ const app = express();
 
 // ===== MIDDLEWARE =====
 app.use(cors());
-app.use(express.json({ limit: "10mb" })); // Base64 images ke liye
+app.use(express.json({ limit: "10mb" }));
 
 // ===== PORT =====
 const PORT = process.env.PORT || 5000;
@@ -19,7 +19,6 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || "super_secret_key_123";
 
 // ===== DATABASE CONNECTION =====
-// ⚠️ IMPORTANT: Isme apna MONGODB_URI daalo (environment variable se ya direct)
 const DB_URI =
   process.env.MONGODB_URI ||
   "mongodb+srv://yashmaurya0071_db_user:NicikZKOn8NePhX7@studentresourcehub.yruinrf.mongodb.net/?appName=StudentResourceHub";
@@ -33,7 +32,6 @@ mongoose
 // ========== SCHEMAS ==========
 // ============================================================
 
-// 1. USER SCHEMA
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -45,7 +43,6 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.model("User", userSchema);
 
-// 2. RESOURCE SCHEMA (userId added to track who uploaded)
 const resourceSchema = new mongoose.Schema(
   {
     id: String,
@@ -55,7 +52,7 @@ const resourceSchema = new mongoose.Schema(
     condition: String,
     description: String,
     image: String,
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // Track uploader
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },
 );
@@ -68,7 +65,7 @@ const Resource = mongoose.model("Resource", resourceSchema);
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1]; // "Bearer TOKEN"
+  const token = authHeader && authHeader.split(" ")[1];
 
   if (!token) {
     return res
@@ -80,7 +77,7 @@ const authenticateToken = (req, res, next) => {
     if (err) {
       return res.status(403).json({ message: "Invalid or expired token." });
     }
-    req.user = user; // { id, email } store kar lo
+    req.user = user;
     next();
   });
 };
@@ -97,21 +94,17 @@ app.get("/", (req, res) => {
 // ========== AUTH ROUTES ==========
 // ============================================================
 
-// ----- SIGNUP -----
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
-    // Check if user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "Email already registered." });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create new user
     const newUser = new User({
       name,
       email,
@@ -127,24 +120,20 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
-// ----- LOGIN -----
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password." });
     }
 
-    // Compare password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid email or password." });
     }
 
-    // Generate JWT token
     const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, {
       expiresIn: "7d",
     });
@@ -164,10 +153,23 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ============================================================
+// ========== USER ROUTE ==========
+// ============================================================
+
+app.get("/api/users", authenticateToken, async (req, res) => {
+  try {
+    const users = await User.find().select("-password").sort({ createdAt: -1 });
+    res.json(users);
+  } catch (err) {
+    console.error("Users fetch error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================
 // ========== RESOURCE ROUTES ==========
 // ============================================================
 
-// ----- GET ALL RESOURCES (PUBLIC) -----
 app.get("/api/resources", async (req, res) => {
   try {
     const resources = await Resource.find().sort({ createdAt: -1 });
@@ -177,12 +179,11 @@ app.get("/api/resources", async (req, res) => {
   }
 });
 
-// ----- POST NEW RESOURCE (PROTECTED) -----
 app.post("/api/resources", authenticateToken, async (req, res) => {
   try {
     const newResource = new Resource({
       ...req.body,
-      userId: req.user.id, // Track who uploaded
+      userId: req.user.id,
     });
     const savedResource = await newResource.save();
     res.status(201).json(savedResource);
@@ -192,13 +193,22 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
   }
 });
 
-// ----- DELETE RESOURCE (PROTECTED) -----
 app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
   try {
-    const deleted = await Resource.findOneAndDelete({ id: req.params.id });
-    if (!deleted) {
+    const resource = await Resource.findOne({ id: req.params.id });
+
+    if (!resource) {
       return res.status(404).json({ message: "Resource not found" });
     }
+
+    if (resource.userId && resource.userId.toString() !== req.user.id) {
+      return res.status(403).json({
+        message:
+          "You are not authorized to delete this resource. Only the owner can delete it.",
+      });
+    }
+
+    await Resource.findOneAndDelete({ id: req.params.id });
     res.json({ message: "Deleted successfully" });
   } catch (err) {
     console.error("Delete error:", err);
