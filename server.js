@@ -30,36 +30,15 @@ mongoose
   .catch((err) => console.log("❌ Database error:", err));
 
 // ============================================================
-// ========== EMAIL CONFIGURATION (IPv4 FORCED) ==========
+// ========== EMAIL CONFIGURATION (Not used) ==========
 // ============================================================
 
-// 🔥 Render Environment Variables se read karo
-const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
-const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
-
-// IPv4 forced configuration (Port 587 with TLS)
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, // true for 465, false for 587
+  service: "gmail",
   auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
+    user: "yashmaurya0071@gmail.com",
+    pass: "your-app-password",
   },
-  tls: {
-    rejectUnauthorized: false,
-  },
-  // Force IPv4 (Node.js default is IPv6 first)
-  family: 4,
-});
-
-// Verify email configuration on startup
-transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ Email configuration error:", error.message);
-  } else {
-    console.log("✅ Email configured successfully!");
-  }
 });
 
 // ============================================================
@@ -184,7 +163,7 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// ========== FORGOT PASSWORD ==========
+// ========== FORGOT PASSWORD (OTP IN RESPONSE - NO EMAIL) ==========
 // ============================================================
 
 app.post("/api/auth/forgot-password", async (req, res) => {
@@ -202,7 +181,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log("🔑 Generated OTP for", email, ":", otp);
+    console.log("🔑 OTP for", email, ":", otp);
 
     const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
@@ -211,40 +190,14 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     user.resetPasswordExpires = expires;
     await user.save();
 
-    // ========== SEND EMAIL WITH OTP ==========
-    const mailOptions = {
-      from: `"Student Resource Hub" <${EMAIL_USER}>`,
-      to: email,
-      subject: "🔐 Password Reset OTP - Student Resource Hub",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc;">
-          <div style="text-align: center; margin-bottom: 20px;">
-            <h1 style="color: #0f172a; font-size: 24px; margin: 0;">📚 Student Resource Hub</h1>
-            <hr style="border: 1px solid #14b8a6; width: 60px; margin: 10px auto;" />
-          </div>
-          <h2 style="color: #0f172a; font-size: 20px;">Password Reset Request</h2>
-          <p style="color: #475569; font-size: 16px;">Hi <strong>${user.name}</strong>,</p>
-          <p style="color: #475569; font-size: 16px;">You requested to reset your password. Use the following OTP to proceed:</p>
-          <div style="background: white; padding: 20px; border-radius: 10px; text-align: center; font-size: 36px; letter-spacing: 12px; font-weight: bold; color: #0f172a; border: 2px dashed #14b8a6; margin: 20px 0;">
-            ${otp}
-          </div>
-          <p style="color: #64748b; font-size: 14px;">This OTP is valid for <strong>10 minutes</strong>.</p>
-          <hr style="border: 1px solid #e2e8f0; margin: 20px 0;" />
-          <p style="color: #94a3b8; font-size: 12px; text-align: center;">If you didn't request this, please ignore this email.</p>
-        </div>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log("✅ Email sent successfully to:", email);
-
-    res.json({ message: "OTP sent successfully to your email." });
-  } catch (err) {
-    console.error("❌ Forgot password error:", err);
-    res.status(500).json({
-      message: "Failed to send OTP. Please try again later.",
-      error: err.message,
+    // 🔥 NO EMAIL - OTP directly in response
+    res.json({
+      message: "OTP generated successfully!",
+      otp: otp,
     });
+  } catch (err) {
+    console.error("❌ Error:", err);
+    res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 
@@ -373,25 +326,6 @@ app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("Delete error:", err);
     res.status(500).json({ message: err.message });
-  }
-});
-
-// ============================================================
-// ========== TEST EMAIL ROUTE ==========
-// ============================================================
-
-app.get("/api/test-email", async (req, res) => {
-  try {
-    await transporter.sendMail({
-      from: `"Student Resource Hub" <${EMAIL_USER}>`,
-      to: EMAIL_USER,
-      subject: "✅ Email Configuration Test",
-      text: "If you're reading this, email is working perfectly!",
-    });
-    res.json({ message: "Test email sent successfully!" });
-  } catch (err) {
-    console.error("Test email error:", err);
-    res.status(500).json({ message: "Email test failed: " + err.message });
   }
 });
 
