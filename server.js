@@ -37,8 +37,8 @@ mongoose
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "yashmaurya0071@gmail.com", // <-- Apna Gmail
-    pass: "egsadypeluwycupt", // <-- App Password (BINA SPACE)
+    user: process.env.EMAIL_USER || "yashmaurya0071@gmail.com",
+    pass: process.env.EMAIL_PASS || "egsadypeluwycupt",
   },
 });
 
