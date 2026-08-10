@@ -30,19 +30,27 @@ mongoose
   .catch((err) => console.log("❌ Database error:", err));
 
 // ============================================================
-// ========== EMAIL CONFIGURATION (PROFESSIONAL MODE) ==========
+// ========== EMAIL CONFIGURATION (IPv4 FORCED) ==========
 // ============================================================
 
 // 🔥 Render Environment Variables se read karo
 const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
 const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
 
+// IPv4 forced configuration (Port 587 with TLS)
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // true for 465, false for 587
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
+  tls: {
+    rejectUnauthorized: false,
+  },
+  // Force IPv4 (Node.js default is IPv6 first)
+  family: 4,
 });
 
 // Verify email configuration on startup
@@ -176,7 +184,7 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// ========== FORGOT PASSWORD (PROFESSIONAL - EMAIL SENT) ==========
+// ========== FORGOT PASSWORD ==========
 // ============================================================
 
 app.post("/api/auth/forgot-password", async (req, res) => {
@@ -198,7 +206,6 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Hash OTP before saving
     const hashedOTP = await bcrypt.hash(otp, 10);
     user.resetPasswordOTP = hashedOTP;
     user.resetPasswordExpires = expires;
