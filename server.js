@@ -30,15 +30,14 @@ mongoose
   .catch((err) => console.log("❌ Database error:", err));
 
 // ============================================================
-// ========== EMAIL CONFIGURATION (HARDCODED FOR TEST) ==========
+// ========== EMAIL CONFIGURATION (Not used in dev mode) ==========
 // ============================================================
 
-// 🔥 YAHAN APNA REAL EMAIL AUR APP PASSWORD DAALO (BINA SPACE)
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: process.env.EMAIL_USER || "yashmaurya0071@gmail.com",
-    pass: process.env.EMAIL_PASS || "egsadypeluwycupt",
+    user: "yashmaurya0071@gmail.com",
+    pass: "your-app-password",
   },
 });
 
@@ -110,26 +109,16 @@ app.get("/", (req, res) => {
 // ========== AUTH ROUTES ==========
 // ============================================================
 
-// ----- SIGNUP -----
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
-
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "Email already registered." });
     }
-
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = new User({
-      name,
-      email,
-      password: hashedPassword,
-    });
-
+    const newUser = new User({ name, email, password: hashedPassword });
     await newUser.save();
-
     res.status(201).json({ message: "User created successfully!" });
   } catch (err) {
     console.error("Signup error:", err);
@@ -137,32 +126,23 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
-// ----- LOGIN -----
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: "Invalid email or password." });
     }
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid email or password." });
     }
-
     const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, {
       expiresIn: "7d",
     });
-
     res.json({
       token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-      },
+      user: { id: user._id, name: user.name, email: user.email },
     });
   } catch (err) {
     console.error("Login error:", err);
@@ -170,7 +150,6 @@ app.post("/api/auth/login", async (req, res) => {
   }
 });
 
-// ----- GET USER PROFILE (Protected) -----
 app.get("/api/auth/me", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
@@ -184,11 +163,12 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// ========== FORGOT PASSWORD / OTP ROUTES ==========
+// ========== FORGOT PASSWORD (DEVELOPMENT MODE - OTP in Response) ==========
 // ============================================================
 
-// ----- 1. FORGOT PASSWORD (Send OTP) -----
 app.post("/api/auth/forgot-password", async (req, res) => {
+  console.log("📧 Forgot password request for:", req.body.email);
+
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
@@ -201,47 +181,27 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    console.log("🔑 Generated OTP for", email, ":", otp);
+
     const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Hash OTP before saving
     const hashedOTP = await bcrypt.hash(otp, 10);
-
     user.resetPasswordOTP = hashedOTP;
     user.resetPasswordExpires = expires;
     await user.save();
 
-    // Send Email
-    const mailOptions = {
-      from: "yashmaurya0071@gmail.com", // 🔥 APNA EMAIL (SAME AS ABOVE)
-      to: email,
-      subject: "🔐 Student Resource Hub - Password Reset OTP",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
-          <h2 style="color: #0f172a;">Password Reset Request</h2>
-          <p>Hi ${user.name},</p>
-          <p>You requested to reset your password. Use the following OTP to proceed:</p>
-          <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; text-align: center; font-size: 32px; letter-spacing: 8px; font-weight: bold; color: #0f172a;">
-            ${otp}
-          </div>
-          <p style="color: #64748b; font-size: 0.9rem;">This OTP is valid for <strong>10 minutes</strong>.</p>
-          <hr style="border: 1px solid #e2e8f0;" />
-          <p style="color: #94a3b8; font-size: 0.8rem;">If you didn't request this, please ignore this email.</p>
-        </div>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-
-    res.json({ message: "OTP sent successfully to your email." });
+    // 🔥 DEVELOPMENT MODE: OTP returned in JSON (No email sent)
+    res.json({
+      message: "OTP generated successfully! (Development Mode)",
+      otp: otp,
+    });
   } catch (err) {
-    console.error("Forgot password error:", err);
-    res
-      .status(500)
-      .json({ message: "Failed to send OTP. Please try again later." });
+    console.error("❌ Forgot password error:", err);
+    res.status(500).json({ message: "Server error. Please try again." });
   }
 });
 
-// ----- 2. VERIFY OTP -----
+// ----- VERIFY OTP -----
 app.post("/api/auth/verify-otp", async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -271,7 +231,7 @@ app.post("/api/auth/verify-otp", async (req, res) => {
   }
 });
 
-// ----- 3. RESET PASSWORD -----
+// ----- RESET PASSWORD -----
 app.post("/api/auth/reset-password", async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -334,10 +294,7 @@ app.get("/api/resources", async (req, res) => {
 
 app.post("/api/resources", authenticateToken, async (req, res) => {
   try {
-    const newResource = new Resource({
-      ...req.body,
-      userId: req.user.id,
-    });
+    const newResource = new Resource({ ...req.body, userId: req.user.id });
     const savedResource = await newResource.save();
     res.status(201).json(savedResource);
   } catch (err) {
@@ -349,18 +306,15 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
 app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
-
     if (!resource) {
       return res.status(404).json({ message: "Resource not found" });
     }
-
     if (resource.userId && resource.userId.toString() !== req.user.id) {
       return res.status(403).json({
         message:
           "You are not authorized to delete this resource. Only the owner can delete it.",
       });
     }
-
     await Resource.findOneAndDelete({ id: req.params.id });
     res.json({ message: "Deleted successfully" });
   } catch (err) {
