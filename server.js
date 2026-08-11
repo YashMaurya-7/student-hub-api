@@ -8,24 +8,17 @@ const nodemailer = require("nodemailer");
 const dns = require("dns");
 require("dotenv").config();
 
-// ============================================================
-// 🔥 SAB SE IMPORTANT: Force IPv4 (Render ka IPv6 issue fix)
-// ============================================================
+// Force IPv4
 dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
 
-// ===== MIDDLEWARE =====
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-// ===== PORT =====
 const PORT = process.env.PORT || 5000;
-
-// ===== JWT SECRET =====
 const JWT_SECRET = process.env.JWT_SECRET || "super_secret_key_123";
 
-// ===== DATABASE CONNECTION =====
 const DB_URI =
   process.env.MONGODB_URI ||
   "mongodb+srv://yashmaurya0071_db_user:NicikZKOn8NePhX7@studentresourcehub.yruinrf.mongodb.net/?appName=StudentResourceHub";
@@ -36,40 +29,24 @@ mongoose
   .catch((err) => console.log("❌ Database error:", err));
 
 // ============================================================
-// ========== EMAIL CONFIGURATION (PROFESSIONAL) ==========
+// ========== EMAIL CONFIGURATION ==========
 // ============================================================
 
-// 🔥 RENDER ENVIRONMENT VARIABLES SE READ KARO
-// EMAIL_USER = your-email@gmail.com
-// EMAIL_PASS = 16-digit App Password (BINA SPACE)
 const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
 const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 587,
-  secure: false, // 587 ke liye false
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false,
-  },
-  family: 4, // IPv4 force
-  connectionTimeout: 30000, // 30 seconds timeout
-  greetingTimeout: 30000,
-  socketTimeout: 30000,
+  secure: false,
+  auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+  tls: { rejectUnauthorized: false },
+  family: 4,
 });
 
-// Verify email configuration on startup
 transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ Email configuration error:", error.message);
-    console.log("💡 Check: EMAIL_USER and EMAIL_PASS in Render Environment");
-  } else {
-    console.log("✅ Email configured successfully!");
-  }
+  if (error) console.log("❌ Email error:", error.message);
+  else console.log("✅ Email configured!");
 });
 
 // ============================================================
@@ -89,16 +66,22 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.model("User", userSchema);
 
+// 🔥 UPDATED: Added `isSold` field
 const resourceSchema = new mongoose.Schema(
   {
     id: String,
-    title: String,
-    type: String,
-    price: Number,
-    condition: String,
-    description: String,
-    image: String,
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    title: { type: String, required: true },
+    type: { type: String, enum: ["note", "book"], required: true },
+    price: { type: Number, required: true },
+    condition: { type: String, required: true },
+    description: { type: String, default: "" },
+    image: { type: String, required: true },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    isSold: { type: Boolean, default: false }, // 🔥 NEW FIELD
   },
   { timestamps: true },
 );
@@ -106,23 +89,15 @@ const resourceSchema = new mongoose.Schema(
 const Resource = mongoose.model("Resource", resourceSchema);
 
 // ============================================================
-// ========== MIDDLEWARE: AUTHENTICATE TOKEN ==========
+// ========== MIDDLEWARE ==========
 // ============================================================
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-
-  if (!token) {
-    return res
-      .status(401)
-      .json({ message: "Access denied. No token provided." });
-  }
-
+  if (!token) return res.status(401).json({ message: "Access denied." });
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ message: "Invalid or expired token." });
-    }
+    if (err) return res.status(403).json({ message: "Invalid token." });
     req.user = user;
     next();
   });
@@ -133,7 +108,7 @@ const authenticateToken = (req, res, next) => {
 // ============================================================
 
 app.get("/", (req, res) => {
-  res.send("🚀 Student Resource Hub API with Auth is running!");
+  res.send("🚀 Student Resource Hub API is running!");
 });
 
 // ============================================================
@@ -144,16 +119,14 @@ app.post("/api/auth/signup", async (req, res) => {
   try {
     const { name, email, password } = req.body;
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    if (existingUser)
       return res.status(400).json({ message: "Email already registered." });
-    }
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = new User({ name, email, password: hashedPassword });
     await newUser.save();
     res.status(201).json({ message: "User created successfully!" });
   } catch (err) {
-    console.error("Signup error:", err);
-    res.status(500).json({ message: "Server error. Please try again." });
+    res.status(500).json({ message: err.message });
   }
 });
 
@@ -161,13 +134,10 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: "Invalid email or password." });
-    }
+    if (!user) return res.status(400).json({ message: "Invalid credentials." });
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid email or password." });
-    }
+    if (!isMatch)
+      return res.status(400).json({ message: "Invalid credentials." });
     const token = jwt.sign({ id: user._id, email: user.email }, JWT_SECRET, {
       expiresIn: "7d",
     });
@@ -176,17 +146,13 @@ app.post("/api/auth/login", async (req, res) => {
       user: { id: user._id, name: user.name, email: user.email },
     });
   } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ message: "Server error. Please try again." });
+    res.status(500).json({ message: err.message });
   }
 });
 
 app.get("/api/auth/me", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
     res.json(user);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -194,158 +160,73 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// ========== FORGOT PASSWORD (PROFESSIONAL - EMAIL SENT) ==========
+// ========== FORGOT PASSWORD ==========
 // ============================================================
 
 app.post("/api/auth/forgot-password", async (req, res) => {
-  console.log("📧 Forgot password request for:", req.body.email);
-
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
-
-    if (!user) {
-      return res
-        .status(404)
-        .json({ message: "User with this email does not exist." });
-    }
-
-    // Generate 6-digit OTP
+    if (!user) return res.status(404).json({ message: "User not found." });
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    console.log("🔑 Generated OTP for", email, ":", otp);
-
-    const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
-
+    const expires = Date.now() + 10 * 60 * 1000;
     const hashedOTP = await bcrypt.hash(otp, 10);
     user.resetPasswordOTP = hashedOTP;
     user.resetPasswordExpires = expires;
     await user.save();
 
-    // ========== SEND EMAIL WITH OTP ==========
-    const mailOptions = {
-      from: `"Student Resource Hub" <${EMAIL_USER}>`,
+    // Send Email
+    await transporter.sendMail({
+      from: `"Student Hub" <${EMAIL_USER}>`,
       to: email,
-      subject: "🔐 Password Reset OTP - Student Resource Hub",
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc;">
-          <div style="text-align: center; margin-bottom: 20px;">
-            <h1 style="color: #0f172a; font-size: 24px; margin: 0;">📚 Student Resource Hub</h1>
-            <hr style="border: 1px solid #14b8a6; width: 60px; margin: 10px auto;" />
-          </div>
-          <h2 style="color: #0f172a; font-size: 20px;">Password Reset Request</h2>
-          <p style="color: #475569; font-size: 16px;">Hi <strong>${user.name}</strong>,</p>
-          <p style="color: #475569; font-size: 16px;">You requested to reset your password. Use the following OTP to proceed:</p>
-          <div style="background: white; padding: 20px; border-radius: 10px; text-align: center; font-size: 36px; letter-spacing: 12px; font-weight: bold; color: #0f172a; border: 2px dashed #14b8a6; margin: 20px 0;">
-            ${otp}
-          </div>
-          <p style="color: #64748b; font-size: 14px;">This OTP is valid for <strong>10 minutes</strong>.</p>
-          <hr style="border: 1px solid #e2e8f0; margin: 20px 0;" />
-          <p style="color: #94a3b8; font-size: 12px; text-align: center;">If you didn't request this, please ignore this email.</p>
-        </div>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log("✅ Email sent successfully to:", email);
-
-    res.json({ message: "OTP sent successfully to your email." });
-  } catch (err) {
-    console.error("❌ Forgot password error:", err);
-    res.status(500).json({
-      message: "Failed to send OTP. Please try again later.",
-      error: err.message,
+      subject: "🔐 Password Reset OTP",
+      html: `<div style="padding:20px; font-family:Arial;"><h2>Your OTP: <strong>${otp}</strong></h2><p>Valid for 10 minutes.</p></div>`,
     });
+    res.json({ message: "OTP sent to your email." });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
-
-// ============================================================
-// ========== VERIFY OTP ==========
-// ============================================================
 
 app.post("/api/auth/verify-otp", async (req, res) => {
   try {
     const { email, otp } = req.body;
     const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
-
-    if (user.resetPasswordExpires < Date.now()) {
-      return res
-        .status(400)
-        .json({ message: "OTP has expired. Please request a new one." });
-    }
-
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.resetPasswordExpires < Date.now())
+      return res.status(400).json({ message: "OTP expired." });
     const isValid = await bcrypt.compare(otp, user.resetPasswordOTP);
-    if (!isValid) {
-      return res
-        .status(400)
-        .json({ message: "Invalid OTP. Please try again." });
-    }
-
-    res.json({ message: "OTP verified successfully." });
+    if (!isValid) return res.status(400).json({ message: "Invalid OTP." });
+    res.json({ message: "OTP verified." });
   } catch (err) {
-    console.error("Verify OTP error:", err);
-    res.status(500).json({ message: "Server error." });
+    res.status(500).json({ message: err.message });
   }
 });
-
-// ============================================================
-// ========== RESET PASSWORD ==========
-// ============================================================
 
 app.post("/api/auth/reset-password", async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
     const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
-
-    if (user.resetPasswordExpires < Date.now()) {
-      return res
-        .status(400)
-        .json({ message: "OTP has expired. Please request a new one." });
-    }
-
+    if (!user) return res.status(404).json({ message: "User not found." });
+    if (user.resetPasswordExpires < Date.now())
+      return res.status(400).json({ message: "OTP expired." });
     const isValid = await bcrypt.compare(otp, user.resetPasswordOTP);
-    if (!isValid) {
-      return res.status(400).json({ message: "Invalid OTP." });
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    user.password = hashedPassword;
+    if (!isValid) return res.status(400).json({ message: "Invalid OTP." });
+    user.password = await bcrypt.hash(newPassword, 10);
     user.resetPasswordOTP = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();
-
-    res.json({ message: "Password reset successfully! Please login." });
+    res.json({ message: "Password reset successfully!" });
   } catch (err) {
-    console.error("Reset password error:", err);
-    res.status(500).json({ message: "Server error." });
-  }
-});
-
-// ============================================================
-// ========== USER ROUTE ==========
-// ============================================================
-
-app.get("/api/users", authenticateToken, async (req, res) => {
-  try {
-    const users = await User.find().select("-password").sort({ createdAt: -1 });
-    res.json(users);
-  } catch (err) {
-    console.error("Users fetch error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
 // ============================================================
-// ========== RESOURCE ROUTES ==========
+// ========== 🔥 CATEGORY 1: RESOURCE ROUTES (UPDATED) ==========
 // ============================================================
 
+// 1. GET ALL RESOURCES (Public)
 app.get("/api/resources", async (req, res) => {
   try {
     const resources = await Resource.find().sort({ createdAt: -1 });
@@ -355,36 +236,122 @@ app.get("/api/resources", async (req, res) => {
   }
 });
 
+// 2. 🔥 GET SINGLE RESOURCE BY ID (Detail Page)
+app.get("/api/resources/:id", async (req, res) => {
+  try {
+    // Populate userId to get seller's name and email
+    const resource = await Resource.findOne({ id: req.params.id }).populate(
+      "userId",
+      "name email",
+    );
+    if (!resource)
+      return res.status(404).json({ message: "Resource not found" });
+    res.json(resource);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// 3. 🔥 GET MY LISTINGS (Logged-in user)
+app.get("/api/auth/me/listings", authenticateToken, async (req, res) => {
+  try {
+    const resources = await Resource.find({ userId: req.user.id }).sort({
+      createdAt: -1,
+    });
+    res.json(resources);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// 4. POST NEW RESOURCE
 app.post("/api/resources", authenticateToken, async (req, res) => {
   try {
-    const newResource = new Resource({ ...req.body, userId: req.user.id });
-    const savedResource = await newResource.save();
-    res.status(201).json(savedResource);
+    const newResource = new Resource({
+      ...req.body,
+      userId: req.user.id,
+      isSold: false, // default
+    });
+    const saved = await newResource.save();
+    res.status(201).json(saved);
   } catch (err) {
-    console.error("Upload error:", err);
     res.status(400).json({ message: err.message });
   }
 });
 
-app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
+// 5. 🔥 MARK AS SOLD (Owner only)
+app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
-    if (!resource) {
-      return res.status(404).json({ message: "Resource not found" });
-    }
-    if (resource.userId && resource.userId.toString() !== req.user.id) {
-      return res.status(403).json({
-        message:
-          "You are not authorized to delete this resource. Only the owner can delete it.",
-      });
-    }
-    await Resource.findOneAndDelete({ id: req.params.id });
-    res.json({ message: "Deleted successfully" });
+    if (!resource) return res.status(404).json({ message: "Not found" });
+    if (resource.userId.toString() !== req.user.id)
+      return res.status(403).json({ message: "Not authorized" });
+    resource.isSold = true;
+    await resource.save();
+    res.json({ message: "Resource marked as Sold!", isSold: true });
   } catch (err) {
-    console.error("Delete error:", err);
     res.status(500).json({ message: err.message });
   }
 });
+
+// 6. DELETE RESOURCE
+app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
+  try {
+    const resource = await Resource.findOne({ id: req.params.id });
+    if (!resource) return res.status(404).json({ message: "Not found" });
+    if (resource.userId.toString() !== req.user.id)
+      return res.status(403).json({ message: "Not authorized" });
+    await Resource.findOneAndDelete({ id: req.params.id });
+    res.json({ message: "Deleted successfully" });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// 7. 🔥 REQUEST TO BUY (Send email to seller)
+app.post(
+  "/api/resources/:id/request-buy",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const resource = await Resource.findOne({ id: req.params.id }).populate(
+        "userId",
+        "name email",
+      );
+      if (!resource) return res.status(404).json({ message: "Not found" });
+      if (resource.isSold)
+        return res.status(400).json({ message: "Already sold!" });
+
+      const buyer = await User.findById(req.user.id);
+      const seller = resource.userId;
+
+      // Send email to seller
+      await transporter.sendMail({
+        from: `"Student Hub" <${EMAIL_USER}>`,
+        to: seller.email,
+        subject: `📚 Request to Buy: ${resource.title}`,
+        html: `
+        <div style="padding:20px; font-family:Arial;">
+          <h2>📖 Resource Purchase Request</h2>
+          <p><strong>Buyer:</strong> ${buyer.name} (${buyer.email})</p>
+          <p><strong>Resource:</strong> ${resource.title}</p>
+          <p><strong>Price:</strong> ₹${resource.price}</p>
+          <p><strong>Condition:</strong> ${resource.condition}</p>
+          <p>Please contact the buyer directly to arrange the transaction.</p>
+          <hr />
+          <p style="color:gray;">This is an automated message from Student Resource Hub.</p>
+        </div>
+      `,
+      });
+
+      res.json({
+        message: "Request sent to seller! Check your email for next steps.",
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
 
 // ============================================================
 // ========== TEST EMAIL ROUTE ==========
@@ -393,15 +360,14 @@ app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
 app.get("/api/test-email", async (req, res) => {
   try {
     await transporter.sendMail({
-      from: `"Student Resource Hub" <${EMAIL_USER}>`,
+      from: `"Student Hub" <${EMAIL_USER}>`,
       to: EMAIL_USER,
-      subject: "✅ Email Configuration Test",
-      text: "If you're reading this, email is working perfectly!",
+      subject: "✅ Test",
+      text: "Email works!",
     });
-    res.json({ message: "Test email sent successfully!" });
+    res.json({ message: "Test email sent!" });
   } catch (err) {
-    console.error("Test email error:", err);
-    res.status(500).json({ message: "Email test failed: " + err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
@@ -410,5 +376,5 @@ app.get("/api/test-email", async (req, res) => {
 // ============================================================
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server is running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
