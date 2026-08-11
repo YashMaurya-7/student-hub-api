@@ -8,7 +8,7 @@ const nodemailer = require("nodemailer");
 const dns = require("dns");
 require("dotenv").config();
 
-// Force IPv4
+// 🔥 Force IPv4
 dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
@@ -29,24 +29,42 @@ mongoose
   .catch((err) => console.log("❌ Database error:", err));
 
 // ============================================================
-// ========== EMAIL CONFIGURATION ==========
+// ========== 🔥 EMAIL CONFIGURATION - FORCED IPv4 ==========
 // ============================================================
 
 const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
 const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
 
+// SMTP server ka IPv4 address (Gmail ka hardcoded IP)
+const SMTP_HOST = "smtp.gmail.com";
+const SMTP_PORT = 587;
+
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-  tls: { rejectUnauthorized: false },
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: false, // 587 ke liye false
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false,
+  },
+  // 🔥 SABSE IMPORTANT: Node.js ko force karo IPv4 use karne ke liye
   family: 4,
+  // Timeout increase karo
+  connectionTimeout: 60000,
+  greetingTimeout: 60000,
+  socketTimeout: 60000,
 });
 
+// Verify email
 transporter.verify((error, success) => {
-  if (error) console.log("❌ Email error:", error.message);
-  else console.log("✅ Email configured!");
+  if (error) {
+    console.log("❌ Email error:", error.message);
+  } else {
+    console.log("✅ Email configured!");
+  }
 });
 
 // ============================================================
@@ -66,7 +84,6 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.model("User", userSchema);
 
-// 🔥 UPDATED: Added `isSold` field
 const resourceSchema = new mongoose.Schema(
   {
     id: String,
@@ -81,7 +98,7 @@ const resourceSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    isSold: { type: Boolean, default: false }, // 🔥 NEW FIELD
+    isSold: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
@@ -104,7 +121,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 // ============================================================
-// ========== ROOT ROUTE ==========
+// ========== ROOT ==========
 // ============================================================
 
 app.get("/", (req, res) => {
@@ -175,7 +192,6 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     user.resetPasswordExpires = expires;
     await user.save();
 
-    // Send Email
     await transporter.sendMail({
       from: `"Student Hub" <${EMAIL_USER}>`,
       to: email,
@@ -184,7 +200,8 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     });
     res.json({ message: "OTP sent to your email." });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("❌ Forgot password error:", err);
+    res.status(500).json({ message: "Failed to send OTP. Check server logs." });
   }
 });
 
@@ -223,10 +240,9 @@ app.post("/api/auth/reset-password", async (req, res) => {
 });
 
 // ============================================================
-// ========== 🔥 CATEGORY 1: RESOURCE ROUTES (UPDATED) ==========
+// ========== RESOURCE ROUTES ==========
 // ============================================================
 
-// 1. GET ALL RESOURCES (Public)
 app.get("/api/resources", async (req, res) => {
   try {
     const resources = await Resource.find().sort({ createdAt: -1 });
@@ -236,23 +252,19 @@ app.get("/api/resources", async (req, res) => {
   }
 });
 
-// 2. 🔥 GET SINGLE RESOURCE BY ID (Detail Page)
 app.get("/api/resources/:id", async (req, res) => {
   try {
-    // Populate userId to get seller's name and email
     const resource = await Resource.findOne({ id: req.params.id }).populate(
       "userId",
       "name email",
     );
-    if (!resource)
-      return res.status(404).json({ message: "Resource not found" });
+    if (!resource) return res.status(404).json({ message: "Not found" });
     res.json(resource);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// 3. 🔥 GET MY LISTINGS (Logged-in user)
 app.get("/api/auth/me/listings", authenticateToken, async (req, res) => {
   try {
     const resources = await Resource.find({ userId: req.user.id }).sort({
@@ -264,13 +276,12 @@ app.get("/api/auth/me/listings", authenticateToken, async (req, res) => {
   }
 });
 
-// 4. POST NEW RESOURCE
 app.post("/api/resources", authenticateToken, async (req, res) => {
   try {
     const newResource = new Resource({
       ...req.body,
       userId: req.user.id,
-      isSold: false, // default
+      isSold: false,
     });
     const saved = await newResource.save();
     res.status(201).json(saved);
@@ -279,7 +290,6 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
   }
 });
 
-// 5. 🔥 MARK AS SOLD (Owner only)
 app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
@@ -288,13 +298,12 @@ app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     resource.isSold = true;
     await resource.save();
-    res.json({ message: "Resource marked as Sold!", isSold: true });
+    res.json({ message: "Marked as Sold!", isSold: true });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// 6. DELETE RESOURCE
 app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
@@ -308,7 +317,6 @@ app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// 7. 🔥 REQUEST TO BUY (Send email to seller)
 app.post(
   "/api/resources/:id/request-buy",
   authenticateToken,
@@ -325,7 +333,6 @@ app.post(
       const buyer = await User.findById(req.user.id);
       const seller = resource.userId;
 
-      // Send email to seller
       await transporter.sendMail({
         from: `"Student Hub" <${EMAIL_USER}>`,
         to: seller.email,
@@ -344,17 +351,16 @@ app.post(
       `,
       });
 
-      res.json({
-        message: "Request sent to seller! Check your email for next steps.",
-      });
+      res.json({ message: "Request sent to seller!" });
     } catch (err) {
+      console.error("Request buy error:", err);
       res.status(500).json({ message: err.message });
     }
   },
 );
 
 // ============================================================
-// ========== TEST EMAIL ROUTE ==========
+// ========== TEST EMAIL ==========
 // ============================================================
 
 app.get("/api/test-email", async (req, res) => {
@@ -367,7 +373,8 @@ app.get("/api/test-email", async (req, res) => {
     });
     res.json({ message: "Test email sent!" });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Test email error:", err);
+    res.status(500).json({ message: "Email test failed: " + err.message });
   }
 });
 
