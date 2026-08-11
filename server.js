@@ -36,7 +36,7 @@ const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
 const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
 
 // SMTP server ka IPv4 address (Gmail ka hardcoded IP)
-const SMTP_HOST = "smtp.gmail.com";
+const SMTP_HOST = "142.250.185.108"; // Gmail SMTP ka IPv4 address
 const SMTP_PORT = 587;
 
 const transporter = nodemailer.createTransport({
