@@ -8,7 +8,7 @@ const nodemailer = require("nodemailer");
 const dns = require("dns");
 require("dotenv").config();
 
-// 🔥 Force IPv4
+// Force IPv4
 dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
@@ -29,36 +29,34 @@ mongoose
   .catch((err) => console.log("❌ Database error:", err));
 
 // ============================================================
-// ========== 🔥 EMAIL CONFIGURATION - FORCED IPv4 ==========
+// ========== 🔥 EMAIL CONFIGURATION - DIRECT IPv4 IP ==========
 // ============================================================
 
 const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
 const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
 
-// SMTP server ka IPv4 address (Gmail ka hardcoded IP)
-const SMTP_HOST = "142.250.185.108"; // Gmail SMTP ka IPv4 address
+// 🔥 Gmail SMTP ka DIRECT IPv4 address (Google ka public IP)
+const SMTP_HOST = "142.250.185.108"; // smtp.gmail.com ka IPv4
 const SMTP_PORT = 587;
 
 const transporter = nodemailer.createTransport({
   host: SMTP_HOST,
   port: SMTP_PORT,
-  secure: false, // 587 ke liye false
+  secure: false,
   auth: {
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
   tls: {
-    rejectUnauthorized: false,
+    rejectUnauthorized: false, // IP based connection ke liye
+    servername: "smtp.gmail.com", // SNI ko resolve karne ke liye
   },
-  // 🔥 SABSE IMPORTANT: Node.js ko force karo IPv4 use karne ke liye
-  family: 4,
-  // Timeout increase karo
+  family: 4, // Force IPv4
   connectionTimeout: 60000,
   greetingTimeout: 60000,
   socketTimeout: 60000,
 });
 
-// Verify email
 transporter.verify((error, success) => {
   if (error) {
     console.log("❌ Email error:", error.message);
@@ -298,7 +296,7 @@ app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Not authorized" });
     resource.isSold = true;
     await resource.save();
-    res.json({ message: "Marked as Sold!", isSold: true });
+    res.json({ message: "Marked as Sold!" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -344,9 +342,9 @@ app.post(
           <p><strong>Resource:</strong> ${resource.title}</p>
           <p><strong>Price:</strong> ₹${resource.price}</p>
           <p><strong>Condition:</strong> ${resource.condition}</p>
-          <p>Please contact the buyer directly to arrange the transaction.</p>
+          <p>Please contact the buyer directly.</p>
           <hr />
-          <p style="color:gray;">This is an automated message from Student Resource Hub.</p>
+          <p style="color:gray;">Automated message from Student Resource Hub.</p>
         </div>
       `,
       });
