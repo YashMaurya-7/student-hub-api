@@ -12,7 +12,6 @@ require("dotenv").config();
 dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
-
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
@@ -29,40 +28,24 @@ mongoose
   .catch((err) => console.log("❌ Database error:", err));
 
 // ============================================================
-// ========== 🔥 EMAIL CONFIGURATION - DIRECT IPv4 IP ==========
+// ========== EMAIL CONFIGURATION ==========
 // ============================================================
 
 const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
 const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
 
-// 🔥 Gmail SMTP ka DIRECT IPv4 address (Google ka public IP)
-const SMTP_HOST = "142.250.185.108"; // smtp.gmail.com ka IPv4
-const SMTP_PORT = 587;
-
 const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: SMTP_PORT,
+  host: "smtp.gmail.com",
+  port: 587,
   secure: false,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
-  },
-  tls: {
-    rejectUnauthorized: false, // IP based connection ke liye
-    servername: "smtp.gmail.com", // SNI ko resolve karne ke liye
-  },
-  family: 4, // Force IPv4
-  connectionTimeout: 60000,
-  greetingTimeout: 60000,
-  socketTimeout: 60000,
+  auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+  tls: { rejectUnauthorized: false },
+  family: 4,
 });
 
 transporter.verify((error, success) => {
-  if (error) {
-    console.log("❌ Email error:", error.message);
-  } else {
-    console.log("✅ Email configured!");
-  }
+  if (error) console.log("❌ Email error:", error.message);
+  else console.log("✅ Email configured!");
 });
 
 // ============================================================
@@ -102,6 +85,28 @@ const resourceSchema = new mongoose.Schema(
 );
 
 const Resource = mongoose.model("Resource", resourceSchema);
+
+// 🔥 NEW: Message Schema for Chat
+const messageSchema = new mongoose.Schema(
+  {
+    resourceId: { type: String, required: true },
+    senderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    receiverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    content: { type: String, required: true },
+    read: { type: Boolean, default: false },
+  },
+  { timestamps: true },
+);
+
+const Message = mongoose.model("Message", messageSchema);
 
 // ============================================================
 // ========== MIDDLEWARE ==========
@@ -194,12 +199,11 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       from: `"Student Hub" <${EMAIL_USER}>`,
       to: email,
       subject: "🔐 Password Reset OTP",
-      html: `<div style="padding:20px; font-family:Arial;"><h2>Your OTP: <strong>${otp}</strong></h2><p>Valid for 10 minutes.</p></div>`,
+      html: `<div><h2>Your OTP: <strong>${otp}</strong></h2><p>Valid for 10 minutes.</p></div>`,
     });
-    res.json({ message: "OTP sent to your email." });
+    res.json({ message: "OTP sent." });
   } catch (err) {
-    console.error("❌ Forgot password error:", err);
-    res.status(500).json({ message: "Failed to send OTP. Check server logs." });
+    res.status(500).json({ message: err.message });
   }
 });
 
@@ -335,27 +339,165 @@ app.post(
         from: `"Student Hub" <${EMAIL_USER}>`,
         to: seller.email,
         subject: `📚 Request to Buy: ${resource.title}`,
-        html: `
-        <div style="padding:20px; font-family:Arial;">
-          <h2>📖 Resource Purchase Request</h2>
-          <p><strong>Buyer:</strong> ${buyer.name} (${buyer.email})</p>
-          <p><strong>Resource:</strong> ${resource.title}</p>
-          <p><strong>Price:</strong> ₹${resource.price}</p>
-          <p><strong>Condition:</strong> ${resource.condition}</p>
-          <p>Please contact the buyer directly.</p>
-          <hr />
-          <p style="color:gray;">Automated message from Student Resource Hub.</p>
-        </div>
-      `,
+        html: `<div><h2>Purchase Request</h2><p><strong>Buyer:</strong> ${buyer.name} (${buyer.email})</p><p><strong>Resource:</strong> ${resource.title}</p><p><strong>Price:</strong> ₹${resource.price}</p></div>`,
       });
 
-      res.json({ message: "Request sent to seller!" });
+      // Also create a chat message for the request
+      const chatMsg = new Message({
+        resourceId: resource.id,
+        senderId: req.user.id,
+        receiverId: seller._id,
+        content: `I'm interested in buying "${resource.title}". Please contact me.`,
+      });
+      await chatMsg.save();
+
+      res.json({
+        message: "Request sent to seller and chat message created!",
+        sellerId: seller._id,
+      });
     } catch (err) {
-      console.error("Request buy error:", err);
       res.status(500).json({ message: err.message });
     }
   },
 );
+
+// ============================================================
+// ========== 🔥 CHAT ROUTES ==========
+// ============================================================
+
+// Get all conversations for current user
+app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    // Find all messages where user is sender or receiver
+    const messages = await Message.find({
+      $or: [{ senderId: userId }, { receiverId: userId }],
+    }).sort({ createdAt: -1 });
+
+    // Get unique conversation partners
+    const conversations = {};
+    for (const msg of messages) {
+      const partnerId =
+        msg.senderId.toString() === userId
+          ? msg.receiverId.toString()
+          : msg.senderId.toString();
+      if (!conversations[partnerId]) {
+        const partner = await User.findById(partnerId).select("name email");
+        if (partner) {
+          conversations[partnerId] = {
+            userId: partnerId,
+            name: partner.name,
+            email: partner.email,
+            lastMessage: msg.content,
+            lastMessageTime: msg.createdAt,
+            resourceId: msg.resourceId,
+            unread: msg.senderId.toString() !== userId && !msg.read ? 1 : 0,
+          };
+        }
+      } else {
+        // Count unread
+        if (msg.senderId.toString() !== userId && !msg.read) {
+          conversations[partnerId].unread += 1;
+        }
+      }
+    }
+
+    const result = Object.values(conversations).sort(
+      (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime),
+    );
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get messages with a specific user (for a resource)
+app.get(
+  "/api/chat/messages/:userId/:resourceId",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { userId, resourceId } = req.params;
+      const currentUserId = req.user.id;
+
+      const messages = await Message.find({
+        resourceId: resourceId,
+        $or: [
+          { senderId: currentUserId, receiverId: userId },
+          { senderId: userId, receiverId: currentUserId },
+        ],
+      }).sort({ createdAt: 1 });
+
+      // Mark messages as read
+      await Message.updateMany(
+        { senderId: userId, receiverId: currentUserId, read: false },
+        { read: true },
+      );
+
+      res.json(messages);
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// Send a message
+app.post("/api/chat/messages", authenticateToken, async (req, res) => {
+  try {
+    const { receiverId, resourceId, content } = req.body;
+    const senderId = req.user.id;
+
+    if (!content.trim())
+      return res.status(400).json({ message: "Message cannot be empty." });
+
+    const newMessage = new Message({
+      resourceId,
+      senderId,
+      receiverId,
+      content: content.trim(),
+      read: false,
+    });
+
+    await newMessage.save();
+
+    // Populate sender info for response
+    const populated = await Message.findById(newMessage._id).populate(
+      "senderId",
+      "name",
+    );
+
+    res.status(201).json(populated);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Get unread count
+app.get("/api/chat/unread", authenticateToken, async (req, res) => {
+  try {
+    const count = await Message.countDocuments({
+      receiverId: req.user.id,
+      read: false,
+    });
+    res.json({ unread: count });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================
+// ========== USER ROUTE ==========
+// ============================================================
+
+app.get("/api/users", authenticateToken, async (req, res) => {
+  try {
+    const users = await User.find().select("-password").sort({ createdAt: -1 });
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
 
 // ============================================================
 // ========== TEST EMAIL ==========
@@ -371,7 +513,6 @@ app.get("/api/test-email", async (req, res) => {
     });
     res.json({ message: "Test email sent!" });
   } catch (err) {
-    console.error("Test email error:", err);
     res.status(500).json({ message: "Email test failed: " + err.message });
   }
 });
