@@ -86,7 +86,7 @@ const resourceSchema = new mongoose.Schema(
 
 const Resource = mongoose.model("Resource", resourceSchema);
 
-// 🔥 NEW: Message Schema for Chat
+// 🔥 Message Schema for Chat
 const messageSchema = new mongoose.Schema(
   {
     resourceId: { type: String, required: true },
@@ -369,12 +369,10 @@ app.post(
 app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    // Find all messages where user is sender or receiver
     const messages = await Message.find({
       $or: [{ senderId: userId }, { receiverId: userId }],
     }).sort({ createdAt: -1 });
 
-    // Get unique conversation partners
     const conversations = {};
     for (const msg of messages) {
       const partnerId =
@@ -395,7 +393,6 @@ app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
           };
         }
       } else {
-        // Count unread
         if (msg.senderId.toString() !== userId && !msg.read) {
           conversations[partnerId].unread += 1;
         }
@@ -461,7 +458,6 @@ app.post("/api/chat/messages", authenticateToken, async (req, res) => {
 
     await newMessage.save();
 
-    // Populate sender info for response
     const populated = await Message.findById(newMessage._id).populate(
       "senderId",
       "name",
@@ -473,7 +469,7 @@ app.post("/api/chat/messages", authenticateToken, async (req, res) => {
   }
 });
 
-// Get unread count
+// 🔥 GET UNREAD COUNT (For Badge)
 app.get("/api/chat/unread", authenticateToken, async (req, res) => {
   try {
     const count = await Message.countDocuments({
