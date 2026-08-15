@@ -339,6 +339,37 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
   }
 });
 
+// 🔥 ===== EDIT RESOURCE (PUT) - Owner only =====
+app.put("/api/resources/:id", authenticateToken, async (req, res) => {
+  try {
+    const resource = await Resource.findOne({ id: req.params.id });
+    if (!resource) {
+      return res.status(404).json({ message: "Resource not found" });
+    }
+
+    // Check if user is the owner
+    if (resource.userId.toString() !== req.user.id) {
+      return res
+        .status(403)
+        .json({ message: "Not authorized to edit this resource" });
+    }
+
+    // Update fields
+    const { title, type, price, condition, description } = req.body;
+    resource.title = title || resource.title;
+    resource.type = type || resource.type;
+    resource.price = price !== undefined ? price : resource.price;
+    resource.condition = condition || resource.condition;
+    resource.description = description || resource.description;
+
+    await resource.save();
+    res.json({ message: "Resource updated successfully!", resource });
+  } catch (err) {
+    console.error("Edit error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
 app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
@@ -522,7 +553,7 @@ app.post("/api/chat/messages", authenticateToken, async (req, res) => {
   }
 });
 
-// 🔥 GET UNREAD COUNT
+// GET UNREAD COUNT
 app.get("/api/chat/unread", authenticateToken, async (req, res) => {
   try {
     const count = await Message.countDocuments({
