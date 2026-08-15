@@ -323,8 +323,21 @@ app.get("/api/auth/me/listings", authenticateToken, async (req, res) => {
 
 app.post("/api/resources", authenticateToken, async (req, res) => {
   try {
+    const submittedImages = Array.isArray(req.body.images)
+      ? req.body.images
+      : [req.body.image];
+    const images = submittedImages
+      .filter((image) => typeof image === "string" && image.startsWith("data:image/"))
+      .slice(0, 4);
+
+    if (!images.length) {
+      return res.status(400).json({ message: "Upload at least one valid image." });
+    }
+
     const newResource = new Resource({
       ...req.body,
+      image: images[0],
+      images,
       userId: req.user.id,
       isSold: false,
     });
