@@ -27,8 +27,6 @@ mongoose
 // ========== EMAIL CONFIGURATION ==========
 // ============================================================
 
-// Render's free web services block outbound SMTP ports, including 587.  Use an
-// HTTPS email API instead so password-reset messages work after deployment.
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM;
 
@@ -85,6 +83,7 @@ const resourceSchema = new mongoose.Schema(
     condition: { type: String, required: true },
     description: { type: String, default: "" },
     image: { type: String, required: true },
+    images: { type: [String], default: [] },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -97,7 +96,6 @@ const resourceSchema = new mongoose.Schema(
 
 const Resource = mongoose.model("Resource", resourceSchema);
 
-// Message Schema for Chat
 const messageSchema = new mongoose.Schema(
   {
     resourceId: { type: String, required: true },
@@ -227,8 +225,6 @@ app.post("/api/auth/forgot-password", async (req, res) => {
       });
       console.log("✅ Email sent to:", email);
     } catch (emailErr) {
-      // Do not leave an OTP in the database when it was not delivered, and
-      // never send a reset OTP back to the browser.
       user.resetPasswordOTP = undefined;
       user.resetPasswordExpires = undefined;
       await user.save();
@@ -339,7 +335,7 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
   }
 });
 
-// 🔥 ===== EDIT RESOURCE (PUT) - Owner only =====
+// ===== EDIT RESOURCE (PUT) - Owner only =====
 app.put("/api/resources/:id", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
@@ -347,20 +343,21 @@ app.put("/api/resources/:id", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "Resource not found" });
     }
 
-    // Check if user is the owner
     if (resource.userId.toString() !== req.user.id) {
       return res
         .status(403)
         .json({ message: "Not authorized to edit this resource" });
     }
 
-    // Update fields
-    const { title, type, price, condition, description } = req.body;
+    const { title, type, price, condition, description, image, images } =
+      req.body;
     resource.title = title || resource.title;
     resource.type = type || resource.type;
     resource.price = price !== undefined ? price : resource.price;
     resource.condition = condition || resource.condition;
     resource.description = description || resource.description;
+    if (image) resource.image = image;
+    if (images && images.length > 0) resource.images = images;
 
     await resource.save();
     res.json({ message: "Resource updated successfully!", resource });
@@ -413,8 +410,6 @@ app.post(
       const buyer = await User.findById(req.user.id);
       const seller = resource.userId;
 
-      // A chat request should still be created if the optional email
-      // notification fails (for example, while Resend is in test mode).
       let emailSent = true;
       try {
         await sendEmail({
@@ -553,7 +548,6 @@ app.post("/api/chat/messages", authenticateToken, async (req, res) => {
   }
 });
 
-// GET UNREAD COUNT
 app.get("/api/chat/unread", authenticateToken, async (req, res) => {
   try {
     const count = await Message.countDocuments({
