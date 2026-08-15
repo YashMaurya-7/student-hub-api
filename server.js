@@ -382,12 +382,20 @@ app.post(
       const buyer = await User.findById(req.user.id);
       const seller = resource.userId;
 
-      await sendEmail({
-        to: seller.email,
-        subject: `📚 Request to Buy: ${resource.title}`,
-        text: `${buyer.name} (${buyer.email}) is interested in buying "${resource.title}" for ₹${resource.price}.`,
-        html: `<div><h2>Purchase Request</h2><p><strong>Buyer:</strong> ${buyer.name} (${buyer.email})</p><p><strong>Resource:</strong> ${resource.title}</p><p><strong>Price:</strong> ₹${resource.price}</p></div>`,
-      });
+      // A chat request should still be created if the optional email
+      // notification fails (for example, while Resend is in test mode).
+      let emailSent = true;
+      try {
+        await sendEmail({
+          to: seller.email,
+          subject: `📚 Request to Buy: ${resource.title}`,
+          text: `${buyer.name} (${buyer.email}) is interested in buying "${resource.title}" for ₹${resource.price}.`,
+          html: `<div><h2>Purchase Request</h2><p><strong>Buyer:</strong> ${buyer.name} (${buyer.email})</p><p><strong>Resource:</strong> ${resource.title}</p><p><strong>Price:</strong> ₹${resource.price}</p></div>`,
+        });
+      } catch (emailError) {
+        emailSent = false;
+        console.error("Purchase-request email failed:", emailError.message);
+      }
 
       const chatMsg = new Message({
         resourceId: resource.id,
@@ -398,8 +406,11 @@ app.post(
       await chatMsg.save();
 
       res.json({
-        message: "Request sent to seller and chat message created!",
+        message: emailSent
+          ? "Request sent to the seller and chat message created!"
+          : "Request sent in Messages. The email notification could not be delivered.",
         sellerId: seller._id,
+        emailSent,
       });
     } catch (err) {
       res.status(500).json({ message: err.message });
