@@ -4,12 +4,8 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
-const dns = require("dns");
+const crypto = require("crypto");
 require("dotenv").config();
-
-// Force IPv4
-dns.setDefaultResultOrder("ipv4first");
 
 const app = express();
 app.use(cors());
@@ -31,22 +27,37 @@ mongoose
 // ========== EMAIL CONFIGURATION ==========
 // ============================================================
 
-const EMAIL_USER = process.env.EMAIL_USER || "yashmaurya0071@gmail.com";
-const EMAIL_PASS = process.env.EMAIL_PASS || "your-app-password";
+// Render's free web services block outbound SMTP ports, including 587.  Use an
+// HTTPS email API instead so password-reset messages work after deployment.
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM;
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-  tls: { rejectUnauthorized: false },
-  family: 4,
-});
+async function sendEmail({ to, subject, html, text }) {
+  if (!RESEND_API_KEY || !EMAIL_FROM) {
+    const error = new Error("RESEND_API_KEY or EMAIL_FROM is missing.");
+    error.publicMessage = "Email service is not configured yet.";
+    throw error;
+  }
 
-transporter.verify((error, success) => {
-  if (error) console.log("❌ Email error:", error.message);
-  else console.log("✅ Email configured!");
-});
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ from: EMAIL_FROM, to: [to], subject, html, text }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    console.error("Resend email error:", response.status, detail);
+    const error = new Error(
+      `Resend request failed with status ${response.status}`,
+    );
+    error.publicMessage = "Could not send the email. Please try again later.";
+    throw error;
+  }
+}
 
 // ============================================================
 // ========== SCHEMAS ==========
@@ -86,7 +97,7 @@ const resourceSchema = new mongoose.Schema(
 
 const Resource = mongoose.model("Resource", resourceSchema);
 
-// 🔥 Message Schema for Chat
+// Message Schema for Chat
 const messageSchema = new mongoose.Schema(
   {
     resourceId: { type: String, required: true },
@@ -185,25 +196,53 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
 
 app.post("/api/auth/forgot-password", async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
+    if (!email) return res.status(400).json({ message: "Email is required." });
+
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: "User not found." });
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const otp = crypto.randomInt(100000, 1000000).toString();
     const expires = Date.now() + 10 * 60 * 1000;
     const hashedOTP = await bcrypt.hash(otp, 10);
     user.resetPasswordOTP = hashedOTP;
     user.resetPasswordExpires = expires;
     await user.save();
 
-    await transporter.sendMail({
-      from: `"Student Hub" <${EMAIL_USER}>`,
-      to: email,
-      subject: "🔐 Password Reset OTP",
-      html: `<div><h2>Your OTP: <strong>${otp}</strong></h2><p>Valid for 10 minutes.</p></div>`,
-    });
-    res.json({ message: "OTP sent." });
+    try {
+      await sendEmail({
+        to: email,
+        subject: "🔐 Password Reset OTP",
+        text: `Your Student Resource Hub password-reset OTP is ${otp}. It expires in 10 minutes.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+            <h2 style="color: #0f172a;">🔐 Password Reset OTP</h2>
+            <p>Hi ${user.name},</p>
+            <p>Your OTP is: <strong style="font-size: 28px; color: #14b8a6;">${otp}</strong></p>
+            <p>This OTP is valid for <strong>10 minutes</strong>.</p>
+            <hr />
+            <p style="color: #94a3b8; font-size: 0.8rem;">Student Resource Hub</p>
+          </div>
+        `,
+      });
+      console.log("✅ Email sent to:", email);
+    } catch (emailErr) {
+      // Do not leave an OTP in the database when it was not delivered, and
+      // never send a reset OTP back to the browser.
+      user.resetPasswordOTP = undefined;
+      user.resetPasswordExpires = undefined;
+      await user.save();
+      return res.status(503).json({
+        message:
+          emailErr.publicMessage ||
+          "Could not send the OTP. Please try again later.",
+      });
+    }
+
+    res.json({ message: "OTP sent to your email. It expires in 10 minutes." });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Forgot password error:", err);
+    res.status(500).json({ message: "Could not create a password-reset OTP." });
   }
 });
 
@@ -212,7 +251,11 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     const { email, otp } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: "User not found." });
-    if (user.resetPasswordExpires < Date.now())
+    if (
+      !user.resetPasswordOTP ||
+      !user.resetPasswordExpires ||
+      user.resetPasswordExpires < Date.now()
+    )
       return res.status(400).json({ message: "OTP expired." });
     const isValid = await bcrypt.compare(otp, user.resetPasswordOTP);
     if (!isValid) return res.status(400).json({ message: "Invalid OTP." });
@@ -227,7 +270,11 @@ app.post("/api/auth/reset-password", async (req, res) => {
     const { email, otp, newPassword } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: "User not found." });
-    if (user.resetPasswordExpires < Date.now())
+    if (
+      !user.resetPasswordOTP ||
+      !user.resetPasswordExpires ||
+      user.resetPasswordExpires < Date.now()
+    )
       return res.status(400).json({ message: "OTP expired." });
     const isValid = await bcrypt.compare(otp, user.resetPasswordOTP);
     if (!isValid) return res.status(400).json({ message: "Invalid OTP." });
@@ -335,14 +382,13 @@ app.post(
       const buyer = await User.findById(req.user.id);
       const seller = resource.userId;
 
-      await transporter.sendMail({
-        from: `"Student Hub" <${EMAIL_USER}>`,
+      await sendEmail({
         to: seller.email,
         subject: `📚 Request to Buy: ${resource.title}`,
+        text: `${buyer.name} (${buyer.email}) is interested in buying "${resource.title}" for ₹${resource.price}.`,
         html: `<div><h2>Purchase Request</h2><p><strong>Buyer:</strong> ${buyer.name} (${buyer.email})</p><p><strong>Resource:</strong> ${resource.title}</p><p><strong>Price:</strong> ₹${resource.price}</p></div>`,
       });
 
-      // Also create a chat message for the request
       const chatMsg = new Message({
         resourceId: resource.id,
         senderId: req.user.id,
@@ -362,10 +408,9 @@ app.post(
 );
 
 // ============================================================
-// ========== 🔥 CHAT ROUTES ==========
+// ========== CHAT ROUTES ==========
 // ============================================================
 
-// Get all conversations for current user
 app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -409,7 +454,6 @@ app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
   }
 });
 
-// Get messages with a specific user (for a resource)
 app.get(
   "/api/chat/messages/:userId/:resourceId",
   authenticateToken,
@@ -426,7 +470,6 @@ app.get(
         ],
       }).sort({ createdAt: 1 });
 
-      // Mark messages as read
       await Message.updateMany(
         { senderId: userId, receiverId: currentUserId, read: false },
         { read: true },
@@ -439,7 +482,6 @@ app.get(
   },
 );
 
-// Send a message
 app.post("/api/chat/messages", authenticateToken, async (req, res) => {
   try {
     const { receiverId, resourceId, content } = req.body;
@@ -469,7 +511,7 @@ app.post("/api/chat/messages", authenticateToken, async (req, res) => {
   }
 });
 
-// 🔥 GET UNREAD COUNT (For Badge)
+// 🔥 GET UNREAD COUNT
 app.get("/api/chat/unread", authenticateToken, async (req, res) => {
   try {
     const count = await Message.countDocuments({
@@ -501,9 +543,16 @@ app.get("/api/users", authenticateToken, async (req, res) => {
 
 app.get("/api/test-email", async (req, res) => {
   try {
-    await transporter.sendMail({
-      from: `"Student Hub" <${EMAIL_USER}>`,
-      to: EMAIL_USER,
+    if (!EMAIL_FROM) {
+      return res
+        .status(503)
+        .json({ message: "Email service is not configured yet." });
+    }
+    const match = EMAIL_FROM.match(/<([^>]+)>/);
+    const recipient =
+      process.env.EMAIL_TEST_RECIPIENT || (match ? match[1] : EMAIL_FROM);
+    await sendEmail({
+      to: recipient,
       subject: "✅ Test",
       text: "Email works!",
     });
