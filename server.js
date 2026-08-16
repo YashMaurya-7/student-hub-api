@@ -1042,34 +1042,49 @@ app.delete("/api/admin/users/:id", authenticateToken, requireAdmin, async (req, 
 app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.json([]);
+    }
+
     const messages = await Message.find({
       $or: [{ senderId: userId }, { receiverId: userId }],
     }).sort({ createdAt: -1 });
 
     const conversations = {};
     for (const msg of messages) {
-      const partnerId =
-        msg.senderId.toString() === userId
-          ? msg.receiverId.toString()
-          : msg.senderId.toString();
+      if (!msg.senderId || !msg.receiverId) continue;
+
+      const sId = msg.senderId.toString();
+      const rId = msg.receiverId.toString();
+      const partnerId = sId === userId ? rId : sId;
+
+      if (!partnerId || !mongoose.Types.ObjectId.isValid(partnerId)) continue;
 
       if (!conversations[partnerId]) {
-        const partner = await User.findById(partnerId).select("name email avatar");
-        if (partner) {
-          conversations[partnerId] = {
-            userId: partnerId,
-            name: partner.name,
-            email: partner.email,
-            avatar: partner.avatar || "",
-            lastMessage: msg.content,
-            lastMessageTime: msg.createdAt,
-            resourceId: msg.resourceId,
-            unread: msg.senderId.toString() !== userId && !msg.read ? 1 : 0,
-          };
+        let partner = null;
+        try {
+          partner = await User.findById(partnerId).select("name email avatar");
+        } catch (e) {
+          partner = null;
         }
+
+        const partnerName = partner ? partner.name : "Student (Inactive)";
+        const partnerEmail = partner ? partner.email : "";
+        const partnerAvatar = partner ? partner.avatar || "" : "";
+
+        conversations[partnerId] = {
+          userId: partnerId,
+          name: partnerName,
+          email: partnerEmail,
+          avatar: partnerAvatar,
+          lastMessage: msg.content || "",
+          lastMessageTime: msg.createdAt,
+          resourceId: msg.resourceId || "",
+          unread: sId !== userId && !msg.read ? 1 : 0,
+        };
       } else {
-        if (msg.senderId.toString() !== userId && !msg.read) {
-          conversations[partnerId].unread += 1;
+        if (sId !== userId && !msg.read) {
+          conversations[partnerId].unread = (conversations[partnerId].unread || 0) + 1;
         }
       }
     }
@@ -1080,7 +1095,8 @@ app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Conversations route error:", err);
+    res.status(500).json({ message: "Failed to load conversations: " + err.message });
   }
 });
 
