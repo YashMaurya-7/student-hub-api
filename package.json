@@ -1,10 +1,11 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Student Resource Hub Backend API",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
@@ -18,5 +19,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.1",
     "nodemailer": "^9.0.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
   }
 }

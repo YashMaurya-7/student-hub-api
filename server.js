@@ -8,14 +8,20 @@ const crypto = require("crypto");
 require("dotenv").config();
 
 const app = express();
-app.use(cors());
-// Allow large base64 image uploads (up to 50mb)
+app.use(
+  cors({
+    origin: "*",
+    credentials: true,
+  }),
+);
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || "super_secret_jwt_key_student_hub_2026_x99";
-const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || "admin_hub_secret_2026";
+const JWT_SECRET =
+  process.env.JWT_SECRET || "super_secret_jwt_key_student_hub_2026_x99";
+const ADMIN_SECRET_KEY =
+  process.env.ADMIN_SECRET_KEY || "admin_hub_secret_2026";
 
 const DB_URI =
   process.env.MONGODB_URI ||
@@ -51,9 +57,6 @@ async function sendEmail({ to, subject, html, text }) {
   if (!response.ok) {
     const detail = await response.text();
     console.error("Resend email error:", response.status, detail);
-    const error = new Error(`Resend request failed with status ${response.status}`);
-    error.publicMessage = "Could not send the email. Please try again later.";
-    throw error;
   }
 }
 
@@ -64,7 +67,13 @@ async function sendEmail({ to, subject, html, text }) {
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
     password: { type: String, required: true },
     avatar: { type: String, default: "" },
     bio: { type: String, default: "" },
@@ -76,7 +85,7 @@ const userSchema = new mongoose.Schema(
     resetPasswordOTP: { type: String },
     resetPasswordExpires: { type: Date },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const User = mongoose.model("User", userSchema);
@@ -90,8 +99,8 @@ const resourceSchema = new mongoose.Schema(
     price: { type: Number, required: true, min: 0 },
     condition: { type: String, required: true },
     description: { type: String, default: "" },
-    image: { type: String, required: true }, // Cover photo
-    images: { type: [String], default: [] }, // Description & gallery photos
+    image: { type: String, required: true },
+    images: { type: [String], default: [] },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -99,9 +108,13 @@ const resourceSchema = new mongoose.Schema(
     },
     views: { type: Number, default: 0 },
     isSold: { type: Boolean, default: false },
-    status: { type: String, enum: ["approved", "pending", "rejected"], default: "approved" },
+    status: {
+      type: String,
+      enum: ["approved", "pending", "rejected"],
+      default: "approved",
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const Resource = mongoose.model("Resource", resourceSchema);
@@ -122,12 +135,11 @@ const messageSchema = new mongoose.Schema(
     content: { type: String, required: true },
     read: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const Message = mongoose.model("Message", messageSchema);
 
-// Review & Rating Schema
 const reviewSchema = new mongoose.Schema(
   {
     sellerId: {
@@ -144,12 +156,11 @@ const reviewSchema = new mongoose.Schema(
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, default: "", trim: true },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const Review = mongoose.model("Review", reviewSchema);
 
-// Price Negotiation / Offer Schema
 const offerSchema = new mongoose.Schema(
   {
     resourceId: { type: String, required: true },
@@ -173,7 +184,7 @@ const offerSchema = new mongoose.Schema(
     },
     message: { type: String, default: "" },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const Offer = mongoose.model("Offer", offerSchema);
@@ -185,18 +196,23 @@ const Offer = mongoose.model("Offer", offerSchema);
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-  if (!token) return res.status(401).json({ message: "Access denied. Token missing." });
+  if (!token)
+    return res.status(401).json({ message: "Access denied. Token missing." });
 
   jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-    if (err) return res.status(403).json({ message: "Invalid or expired token." });
+    if (err)
+      return res.status(403).json({ message: "Invalid or expired token." });
 
     try {
-      const user = await User.findById(decoded.id).select("name email role isBlocked");
+      const user = await User.findById(decoded.id).select(
+        "name email role isBlocked",
+      );
       if (!user) return res.status(401).json({ message: "User not found." });
       if (user.isBlocked) {
-        return res.status(403).json({ message: "Your account has been blocked by the admin." });
+        return res
+          .status(403)
+          .json({ message: "Your account has been blocked by the admin." });
       }
-
       req.user = {
         id: user._id.toString(),
         email: user.email,
@@ -224,7 +240,7 @@ const requireAdmin = (req, res, next) => {
 app.get("/", (req, res) => {
   res.json({
     status: "ok",
-    message: "🚀 Student Resource Hub API is running smoothly!",
+    message: "🚀 eduResourceMine API is running!",
     version: "2.0.0",
   });
 });
@@ -237,10 +253,14 @@ app.post("/api/auth/signup", async (req, res) => {
   try {
     const { name, email, password, adminKey } = req.body;
     if (!name || !email || !password) {
-      return res.status(400).json({ message: "Name, email, and password are required." });
+      return res
+        .status(400)
+        .json({ message: "Name, email, and password are required." });
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    const existingUser = await User.findOne({
+      email: email.toLowerCase().trim(),
+    });
     if (existingUser) {
       return res.status(400).json({ message: "Email is already registered." });
     }
@@ -268,23 +288,31 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required." });
+      return res
+        .status(400)
+        .json({ message: "Email and password are required." });
     }
 
     const user = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!user) return res.status(400).json({ message: "Invalid email or password." });
+    if (!user)
+      return res.status(400).json({ message: "Invalid email or password." });
 
     if (user.isBlocked) {
-      return res.status(403).json({ message: "This account has been blocked by an administrator." });
+      return res
+        .status(403)
+        .json({
+          message: "This account has been blocked by an administrator.",
+        });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: "Invalid email or password." });
+    if (!isMatch)
+      return res.status(400).json({ message: "Invalid email or password." });
 
     const token = jwt.sign(
       { id: user._id, email: user.email, role: user.role },
       JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" },
     );
 
     res.json({
@@ -315,7 +343,6 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
   }
 });
 
-// Update current user profile
 app.put("/api/users/profile", authenticateToken, async (req, res) => {
   try {
     const { name, bio, college, phone, avatar } = req.body;
@@ -348,21 +375,28 @@ app.put("/api/users/profile", authenticateToken, async (req, res) => {
   }
 });
 
-// Public profile of any user (by userId)
 app.get("/api/users/:id", async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select(
-      "name email avatar bio college createdAt"
+      "name email avatar bio college createdAt",
     );
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    const listings = await Resource.find({ userId: user._id, status: "approved" }).sort({
+    const listings = await Resource.find({
+      userId: user._id,
+      status: "approved",
+    }).sort({
       createdAt: -1,
     });
-    const reviews = await Review.find({ sellerId: user._id }).populate("reviewerId", "name avatar");
+    const reviews = await Review.find({ sellerId: user._id }).populate(
+      "reviewerId",
+      "name avatar",
+    );
 
     const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
-    const avgRating = reviews.length ? (totalRating / reviews.length).toFixed(1) : "0.0";
+    const avgRating = reviews.length
+      ? (totalRating / reviews.length).toFixed(1)
+      : "0.0";
 
     res.json({
       user,
@@ -386,7 +420,10 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     if (!email) return res.status(400).json({ message: "Email is required." });
 
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: "User with this email not found." });
+    if (!user)
+      return res
+        .status(404)
+        .json({ message: "User with this email not found." });
 
     const otp = crypto.randomInt(100000, 1000000).toString();
     const expires = Date.now() + 10 * 60 * 1000;
@@ -399,36 +436,32 @@ app.post("/api/auth/forgot-password", async (req, res) => {
     try {
       await sendEmail({
         to: email,
-        subject: "🔐 Password Reset OTP - Student Resource Hub",
-        text: `Your Student Resource Hub password-reset OTP is ${otp}. It expires in 10 minutes.`,
+        subject: "Password Reset OTP - eduResourceMine",
+        text: `Your OTP is ${otp}. Valid for 10 minutes.`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 500px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px; background:#0f172a; color:#ffffff;">
-            <h2 style="color: #14b8a6;">🔐 Password Reset OTP</h2>
+            <h2 style="color: #14b8a6;">Password Reset OTP</h2>
             <p>Hi ${user.name},</p>
-            <p>Your one-time password (OTP) is:</p>
-            <div style="background: rgba(20,184,166,0.15); border:1px solid #14b8a6; padding: 12px; border-radius:8px; text-align:center; font-size: 28px; font-weight:bold; letter-spacing:4px; color: #14b8a6;">
-              ${otp}
-            </div>
-            <p style="margin-top:14px; font-size: 0.9rem; color:#94a3b8;">This OTP is valid for <strong>10 minutes</strong>.</p>
-            <hr style="border-color: rgba(255,255,255,0.1);"/>
-            <p style="color: #64748b; font-size: 0.8rem;">Student Resource Hub</p>
+            <p>Your OTP is: <strong style="font-size: 28px; color: #14b8a6;">${otp}</strong></p>
+            <p style="margin-top:14px; font-size: 0.9rem; color:#94a3b8;">Valid for <strong>10 minutes</strong>.</p>
           </div>
         `,
       });
       emailSent = true;
     } catch (emailErr) {
-      console.warn("Could not send email, providing OTP in response for fallback/development.");
+      console.warn(
+        "Email send failed, providing OTP in response for development.",
+      );
     }
 
     res.json({
       message: "OTP generated successfully!",
       emailSent,
-      // Provide OTP in dev if email service isn't active
       otp: !RESEND_API_KEY ? otp : undefined,
     });
   } catch (err) {
     console.error("Forgot password error:", err);
-    res.status(500).json({ message: "Could not create a password-reset OTP." });
+    res.status(500).json({ message: "Could not create password-reset OTP." });
   }
 });
 
@@ -437,8 +470,14 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     const { email, otp } = req.body;
     const user = await User.findOne({ email: email?.trim().toLowerCase() });
     if (!user) return res.status(404).json({ message: "User not found." });
-    if (!user.resetPasswordOTP || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
-      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+    if (
+      !user.resetPasswordOTP ||
+      !user.resetPasswordExpires ||
+      user.resetPasswordExpires < Date.now()
+    ) {
+      return res
+        .status(400)
+        .json({ message: "OTP has expired. Please request a new one." });
     }
     const isValid = await bcrypt.compare(otp, user.resetPasswordOTP);
     if (!isValid) return res.status(400).json({ message: "Invalid OTP code." });
@@ -453,7 +492,11 @@ app.post("/api/auth/reset-password", async (req, res) => {
     const { email, otp, newPassword } = req.body;
     const user = await User.findOne({ email: email?.trim().toLowerCase() });
     if (!user) return res.status(404).json({ message: "User not found." });
-    if (!user.resetPasswordOTP || !user.resetPasswordExpires || user.resetPasswordExpires < Date.now()) {
+    if (
+      !user.resetPasswordOTP ||
+      !user.resetPasswordExpires ||
+      user.resetPasswordExpires < Date.now()
+    ) {
       return res.status(400).json({ message: "OTP has expired." });
     }
     const isValid = await bcrypt.compare(otp, user.resetPasswordOTP);
@@ -471,10 +514,9 @@ app.post("/api/auth/reset-password", async (req, res) => {
 });
 
 // ============================================================
-// ========== WISHLIST / BOOKMARKS ==========
+// ========== WISHLIST ==========
 // ============================================================
 
-// Get user wishlist items
 app.get("/api/wishlist", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -491,7 +533,6 @@ app.get("/api/wishlist", authenticateToken, async (req, res) => {
   }
 });
 
-// Get user wishlist IDs for quick check
 app.get("/api/wishlist/ids", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("wishlist");
@@ -501,7 +542,6 @@ app.get("/api/wishlist/ids", authenticateToken, async (req, res) => {
   }
 });
 
-// Toggle wishlist item
 app.post("/api/wishlist/:id", authenticateToken, async (req, res) => {
   try {
     const resourceId = req.params.id;
@@ -534,53 +574,34 @@ app.post("/api/wishlist/:id", authenticateToken, async (req, res) => {
 // ========== RESOURCE ROUTES ==========
 // ============================================================
 
-// Get all approved resources (with filtering)
 app.get("/api/resources", async (req, res) => {
   try {
-    const { type, subject, search } = req.query;
     const filter = { status: { $ne: "rejected" } };
-
-    if (type && type !== "all") {
-      filter.type = type;
-    }
-    if (subject && subject !== "all") {
-      filter.subject = new RegExp(`^${subject}$`, "i");
-    }
-    if (search) {
-      filter.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-        { subject: { $regex: search, $options: "i" } },
-      ];
-    }
-
     const resources = await Resource.find(filter)
       .populate("userId", "name email avatar college")
       .sort({ createdAt: -1 });
-
     res.json(resources);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Get single resource (increments view count)
 app.get("/api/resources/:id", async (req, res) => {
   try {
     const resource = await Resource.findOneAndUpdate(
       { id: req.params.id },
       { $inc: { views: 1 } },
-      { new: true }
+      { new: true },
     ).populate("userId", "name email avatar college");
 
-    if (!resource) return res.status(404).json({ message: "Resource not found" });
+    if (!resource)
+      return res.status(404).json({ message: "Resource not found" });
     res.json(resource);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Get current user's listings
 app.get("/api/auth/me/listings", authenticateToken, async (req, res) => {
   try {
     const resources = await Resource.find({ userId: req.user.id })
@@ -592,22 +613,34 @@ app.get("/api/auth/me/listings", authenticateToken, async (req, res) => {
   }
 });
 
-// Create new resource (supports separate cover photo & description photos)
 app.post("/api/resources", authenticateToken, async (req, res) => {
   try {
-    const { id, title, type, subject, price, condition, description, image, images } = req.body;
+    const {
+      id,
+      title,
+      type,
+      subject,
+      price,
+      condition,
+      description,
+      image,
+      images,
+    } = req.body;
 
     if (!title || !type || price === undefined || !condition) {
-      return res.status(400).json({ message: "Title, type, price, and condition are required." });
+      return res
+        .status(400)
+        .json({ message: "Title, type, price, and condition are required." });
     }
 
-    // Cover image is required
-    const coverImage = image || (Array.isArray(images) && images.length ? images[0] : null);
+    const coverImage =
+      image || (Array.isArray(images) && images.length ? images[0] : null);
     if (!coverImage) {
-      return res.status(400).json({ message: "Please upload a Cover Photo for your resource." });
+      return res
+        .status(400)
+        .json({ message: "Please upload a Cover Photo for your resource." });
     }
 
-    // Process additional images if provided
     let galleryImages = [];
     if (Array.isArray(images) && images.length) {
       galleryImages = images;
@@ -631,7 +664,10 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
     });
 
     const saved = await newResource.save();
-    const populated = await Resource.findById(saved._id).populate("userId", "name email avatar");
+    const populated = await Resource.findById(saved._id).populate(
+      "userId",
+      "name email avatar",
+    );
     res.status(201).json(populated);
   } catch (err) {
     console.error("Create resource error:", err);
@@ -639,20 +675,31 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
   }
 });
 
-// Edit resource (Owner or Admin)
 app.put("/api/resources/:id", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
-    if (!resource) {
+    if (!resource)
       return res.status(404).json({ message: "Resource not found" });
+
+    if (
+      resource.userId.toString() !== req.user.id &&
+      req.user.role !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Not authorized to edit this resource." });
     }
 
-    // Check ownership or admin
-    if (resource.userId.toString() !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({ message: "Not authorized to edit this resource." });
-    }
-
-    const { title, type, subject, price, condition, description, image, images } = req.body;
+    const {
+      title,
+      type,
+      subject,
+      price,
+      condition,
+      description,
+      image,
+      images,
+    } = req.body;
 
     if (title) resource.title = title.trim();
     if (type) resource.type = type;
@@ -664,28 +711,39 @@ app.put("/api/resources/:id", authenticateToken, async (req, res) => {
     if (Array.isArray(images) && images.length > 0) resource.images = images;
 
     await resource.save();
-    const populated = await Resource.findOne({ id: req.params.id }).populate("userId", "name email avatar");
+    const populated = await Resource.findOne({ id: req.params.id }).populate(
+      "userId",
+      "name email avatar",
+    );
 
-    res.json({ message: "Resource updated successfully!", resource: populated });
+    res.json({
+      message: "Resource updated successfully!",
+      resource: populated,
+    });
   } catch (err) {
     console.error("Edit error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-// Mark resource as sold
 app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
-    if (!resource) return res.status(404).json({ message: "Resource not found" });
-    if (resource.userId.toString() !== req.user.id && req.user.role !== "admin") {
+    if (!resource)
+      return res.status(404).json({ message: "Resource not found" });
+    if (
+      resource.userId.toString() !== req.user.id &&
+      req.user.role !== "admin"
+    ) {
       return res.status(403).json({ message: "Not authorized." });
     }
 
     resource.isSold = !resource.isSold;
     await resource.save();
     res.json({
-      message: resource.isSold ? "Resource marked as Sold!" : "Resource marked as Available!",
+      message: resource.isSold
+        ? "Resource marked as Sold!"
+        : "Resource marked as Available!",
       isSold: resource.isSold,
     });
   } catch (err) {
@@ -693,17 +751,19 @@ app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
   }
 });
 
-// Delete resource (Owner or Admin)
 app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
   try {
     const resource = await Resource.findOne({ id: req.params.id });
-    if (!resource) return res.status(404).json({ message: "Resource not found" });
-    if (resource.userId.toString() !== req.user.id && req.user.role !== "admin") {
+    if (!resource)
+      return res.status(404).json({ message: "Resource not found" });
+    if (
+      resource.userId.toString() !== req.user.id &&
+      req.user.role !== "admin"
+    ) {
       return res.status(403).json({ message: "Not authorized." });
     }
 
     await Resource.findOneAndDelete({ id: req.params.id });
-    // Also clean up offers/messages related if needed
     await Offer.deleteMany({ resourceId: req.params.id });
 
     res.json({ message: "Resource deleted successfully" });
@@ -712,69 +772,76 @@ app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
   }
 });
 
-// Request to Buy (Email + Message)
-app.post("/api/resources/:id/request-buy", authenticateToken, async (req, res) => {
-  try {
-    const resource = await Resource.findOne({ id: req.params.id }).populate("userId", "name email");
-    if (!resource) return res.status(404).json({ message: "Resource not found" });
-    if (resource.isSold) return res.status(400).json({ message: "Resource is already sold!" });
-
-    const buyer = await User.findById(req.user.id);
-    const seller = resource.userId;
-
-    if (seller._id.toString() === req.user.id) {
-      return res.status(400).json({ message: "You cannot request to buy your own resource." });
-    }
-
-    let emailSent = true;
+app.post(
+  "/api/resources/:id/request-buy",
+  authenticateToken,
+  async (req, res) => {
     try {
-      await sendEmail({
-        to: seller.email,
-        subject: `📚 Purchase Request: ${resource.title}`,
-        text: `${buyer.name} (${buyer.email}) wants to buy "${resource.title}" for ₹${resource.price}.`,
-        html: `
+      const resource = await Resource.findOne({ id: req.params.id }).populate(
+        "userId",
+        "name email",
+      );
+      if (!resource)
+        return res.status(404).json({ message: "Resource not found" });
+      if (resource.isSold)
+        return res.status(400).json({ message: "Resource is already sold!" });
+
+      const buyer = await User.findById(req.user.id);
+      const seller = resource.userId;
+
+      if (seller._id.toString() === req.user.id) {
+        return res
+          .status(400)
+          .json({ message: "You cannot request to buy your own resource." });
+      }
+
+      try {
+        await sendEmail({
+          to: seller.email,
+          subject: `Purchase Request: ${resource.title}`,
+          text: `${buyer.name} (${buyer.email}) wants to buy "${resource.title}" for ₹${resource.price}.`,
+          html: `
           <div style="font-family: Arial, sans-serif; max-width: 500px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px; background:#0f172a; color:#ffffff;">
-            <h2 style="color: #14b8a6;">📚 Purchase Request</h2>
+            <h2 style="color: #14b8a6;">Purchase Request</h2>
             <p><strong>Buyer:</strong> ${buyer.name} (${buyer.email})</p>
             <p><strong>Resource:</strong> ${resource.title}</p>
             <p><strong>Price:</strong> ₹${resource.price}</p>
-            <p style="color:#94a3b8; font-size:0.9rem;">Check your messages on Student Resource Hub to communicate with the buyer.</p>
           </div>
         `,
+        });
+      } catch (emailError) {}
+
+      const chatMsg = new Message({
+        resourceId: resource.id,
+        senderId: req.user.id,
+        receiverId: seller._id,
+        content: `Hi! I'm interested in purchasing "${resource.title}" for ₹${resource.price}. Please let me know how we can coordinate.`,
       });
-    } catch (emailError) {
-      emailSent = false;
+      await chatMsg.save();
+
+      res.json({
+        message:
+          "Purchase request sent! A conversation has been initiated in Messages.",
+        sellerId: seller._id,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
     }
-
-    const chatMsg = new Message({
-      resourceId: resource.id,
-      senderId: req.user.id,
-      receiverId: seller._id,
-      content: `👋 Hi! I'm interested in purchasing "${resource.title}" for ₹${resource.price}. Please let me know how we can coordinate.`,
-    });
-    await chatMsg.save();
-
-    res.json({
-      message: "Purchase request sent! A conversation has been initiated in Messages.",
-      sellerId: seller._id,
-      emailSent,
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+  },
+);
 
 // ============================================================
-// ========== RATINGS & REVIEWS ==========
+// ========== REVIEWS ==========
 // ============================================================
 
-// Submit or update rating & review for seller
 app.post("/api/reviews", authenticateToken, async (req, res) => {
   try {
     const { sellerId, resourceId, rating, comment } = req.body;
 
     if (!sellerId || !rating) {
-      return res.status(400).json({ message: "Seller ID and a 1-5 star rating are required." });
+      return res
+        .status(400)
+        .json({ message: "Seller ID and a 1-5 star rating are required." });
     }
 
     if (sellerId === req.user.id) {
@@ -784,8 +851,11 @@ app.post("/api/reviews", authenticateToken, async (req, res) => {
     const seller = await User.findById(sellerId);
     if (!seller) return res.status(404).json({ message: "Seller not found." });
 
-    // Check if review already exists from this user for this seller
-    let review = await Review.findOne({ sellerId, reviewerId: req.user.id, resourceId });
+    let review = await Review.findOne({
+      sellerId,
+      reviewerId: req.user.id,
+      resourceId,
+    });
 
     if (review) {
       review.rating = Number(rating);
@@ -802,14 +872,18 @@ app.post("/api/reviews", authenticateToken, async (req, res) => {
       await review.save();
     }
 
-    const populated = await Review.findById(review._id).populate("reviewerId", "name avatar");
-    res.status(201).json({ message: "Review submitted successfully!", review: populated });
+    const populated = await Review.findById(review._id).populate(
+      "reviewerId",
+      "name avatar",
+    );
+    res
+      .status(201)
+      .json({ message: "Review submitted successfully!", review: populated });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// Get all reviews for a seller
 app.get("/api/reviews/seller/:sellerId", async (req, res) => {
   try {
     const reviews = await Review.find({ sellerId: req.params.sellerId })
@@ -817,7 +891,9 @@ app.get("/api/reviews/seller/:sellerId", async (req, res) => {
       .sort({ createdAt: -1 });
 
     const total = reviews.reduce((sum, r) => sum + r.rating, 0);
-    const avgRating = reviews.length ? (total / reviews.length).toFixed(1) : "0.0";
+    const avgRating = reviews.length
+      ? (total / reviews.length).toFixed(1)
+      : "0.0";
 
     res.json({
       reviews,
@@ -830,22 +906,29 @@ app.get("/api/reviews/seller/:sellerId", async (req, res) => {
 });
 
 // ============================================================
-// ========== PRICE OFFERS / NEGOTIATION ==========
+// ========== OFFERS ==========
 // ============================================================
 
-// Submit an offer
 app.post("/api/offers", authenticateToken, async (req, res) => {
   try {
     const { resourceId, offeredPrice, message } = req.body;
     if (!resourceId || offeredPrice === undefined) {
-      return res.status(400).json({ message: "Resource ID and offered price are required." });
+      return res
+        .status(400)
+        .json({ message: "Resource ID and offered price are required." });
     }
 
-    const resource = await Resource.findOne({ id: resourceId }).populate("userId", "name email");
-    if (!resource) return res.status(404).json({ message: "Resource not found." });
+    const resource = await Resource.findOne({ id: resourceId }).populate(
+      "userId",
+      "name email",
+    );
+    if (!resource)
+      return res.status(404).json({ message: "Resource not found." });
 
     if (resource.userId._id.toString() === req.user.id) {
-      return res.status(400).json({ message: "You cannot make an offer on your own resource." });
+      return res
+        .status(400)
+        .json({ message: "You cannot make an offer on your own resource." });
     }
 
     const offer = new Offer({
@@ -860,12 +943,11 @@ app.post("/api/offers", authenticateToken, async (req, res) => {
     });
     await offer.save();
 
-    // Create automated chat message
     const offerMsg = new Message({
       resourceId: resource.id,
       senderId: req.user.id,
       receiverId: resource.userId._id,
-      content: `💰 [Price Offer] Proposed ₹${offeredPrice} (Original: ₹${resource.price})${message ? ` - Note: "${message}"` : ""}`,
+      content: `Price Offer: Proposed ₹${offeredPrice} (Original: ₹${resource.price})${message ? ` - Note: "${message}"` : ""}`,
     });
     await offerMsg.save();
 
@@ -875,7 +957,6 @@ app.post("/api/offers", authenticateToken, async (req, res) => {
   }
 });
 
-// Get user's incoming and outgoing offers
 app.get("/api/offers", authenticateToken, async (req, res) => {
   try {
     const offers = await Offer.find({
@@ -891,30 +972,35 @@ app.get("/api/offers", authenticateToken, async (req, res) => {
   }
 });
 
-// Update offer status (Accept / Reject)
 app.put("/api/offers/:id/status", authenticateToken, async (req, res) => {
   try {
     const { status } = req.body;
     if (!["accepted", "rejected"].includes(status)) {
-      return res.status(400).json({ message: "Status must be 'accepted' or 'rejected'." });
+      return res
+        .status(400)
+        .json({ message: "Status must be 'accepted' or 'rejected'." });
     }
 
     const offer = await Offer.findById(req.params.id);
     if (!offer) return res.status(404).json({ message: "Offer not found." });
 
-    if (offer.sellerId.toString() !== req.user.id && req.user.role !== "admin") {
-      return res.status(403).json({ message: "Only the seller can update the offer status." });
+    if (
+      offer.sellerId.toString() !== req.user.id &&
+      req.user.role !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Only the seller can update the offer status." });
     }
 
     offer.status = status;
     await offer.save();
 
-    // Send chat message update
     const statusMsg = new Message({
       resourceId: offer.resourceId,
       senderId: req.user.id,
       receiverId: offer.buyerId,
-      content: `🤝 [Offer Update] The offer of ₹${offer.offeredPrice} for "${offer.resourceTitle}" was ${status.toUpperCase()} by the seller.`,
+      content: `Offer Update: The offer of ₹${offer.offeredPrice} for "${offer.resourceTitle}" was ${status.toUpperCase()} by the seller.`,
     });
     await statusMsg.save();
 
@@ -925,115 +1011,155 @@ app.put("/api/offers/:id/status", authenticateToken, async (req, res) => {
 });
 
 // ============================================================
-// ========== ADMIN PANEL ROUTES ==========
+// ========== ADMIN ROUTES ==========
 // ============================================================
 
-// Admin analytics & stats
-app.get("/api/admin/stats", authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const totalUsers = await User.countDocuments();
-    const totalResources = await Resource.countDocuments();
-    const activeListings = await Resource.countDocuments({ isSold: false, status: { $ne: "rejected" } });
-    const soldListings = await Resource.countDocuments({ isSold: true });
-    const totalOffers = await Offer.countDocuments();
-    const totalReviews = await Review.countDocuments();
+app.get(
+  "/api/admin/stats",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const totalUsers = await User.countDocuments();
+      const totalResources = await Resource.countDocuments();
+      const activeListings = await Resource.countDocuments({
+        isSold: false,
+        status: { $ne: "rejected" },
+      });
+      const soldListings = await Resource.countDocuments({ isSold: true });
+      const totalOffers = await Offer.countDocuments();
+      const totalReviews = await Review.countDocuments();
 
-    res.json({
-      totalUsers,
-      totalResources,
-      activeListings,
-      soldListings,
-      totalOffers,
-      totalReviews,
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Admin list all resources
-app.get("/api/admin/resources", authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const resources = await Resource.find()
-      .populate("userId", "name email role isBlocked")
-      .sort({ createdAt: -1 });
-    res.json(resources);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Admin approve / reject resource
-app.put("/api/admin/resources/:id/status", authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const { status } = req.body;
-    if (!["approved", "rejected", "pending"].includes(status)) {
-      return res.status(400).json({ message: "Invalid status" });
+      res.json({
+        totalUsers,
+        totalResources,
+        activeListings,
+        soldListings,
+        totalOffers,
+        totalReviews,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
     }
+  },
+);
 
-    const resource = await Resource.findOne({ id: req.params.id });
-    if (!resource) return res.status(404).json({ message: "Resource not found" });
-
-    resource.status = status;
-    await resource.save();
-
-    res.json({ message: `Resource status updated to ${status}`, resource });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Admin list all users
-app.get("/api/admin/users", authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const users = await User.find().select("-password").sort({ createdAt: -1 });
-    res.json(users);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// Admin toggle block / unblock user
-app.put("/api/admin/users/:id/block", authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    if (user.role === "admin") {
-      return res.status(400).json({ message: "Cannot block an administrator." });
+app.get(
+  "/api/admin/resources",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const resources = await Resource.find()
+        .populate("userId", "name email role isBlocked")
+        .sort({ createdAt: -1 });
+      res.json(resources);
+    } catch (err) {
+      res.status(500).json({ message: err.message });
     }
+  },
+);
 
-    user.isBlocked = !user.isBlocked;
-    await user.save();
+app.put(
+  "/api/admin/resources/:id/status",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (!["approved", "rejected", "pending"].includes(status)) {
+        return res.status(400).json({ message: "Invalid status" });
+      }
 
-    res.json({
-      message: user.isBlocked ? `User ${user.name} has been blocked.` : `User ${user.name} has been unblocked.`,
-      isBlocked: user.isBlocked,
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+      const resource = await Resource.findOne({ id: req.params.id });
+      if (!resource)
+        return res.status(404).json({ message: "Resource not found" });
 
-// Admin delete user
-app.delete("/api/admin/users/:id", authenticateToken, requireAdmin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ message: "User not found" });
+      resource.status = status;
+      await resource.save();
 
-    if (user.role === "admin") {
-      return res.status(400).json({ message: "Cannot delete an administrator." });
+      res.json({ message: `Resource status updated to ${status}`, resource });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
     }
+  },
+);
 
-    await User.findByIdAndDelete(req.params.id);
-    await Resource.deleteMany({ userId: req.params.id });
-    await Review.deleteMany({ $or: [{ sellerId: req.params.id }, { reviewerId: req.params.id }] });
+app.get(
+  "/api/admin/users",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const users = await User.find()
+        .select("-password")
+        .sort({ createdAt: -1 });
+      res.json(users);
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
 
-    res.json({ message: "User and associated resources deleted successfully." });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+app.put(
+  "/api/admin/users/:id/block",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const user = await User.findById(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      if (user.role === "admin") {
+        return res
+          .status(400)
+          .json({ message: "Cannot block an administrator." });
+      }
+
+      user.isBlocked = !user.isBlocked;
+      await user.save();
+
+      res.json({
+        message: user.isBlocked
+          ? `User ${user.name} has been blocked.`
+          : `User ${user.name} has been unblocked.`,
+        isBlocked: user.isBlocked,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+app.delete(
+  "/api/admin/users/:id",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const user = await User.findById(req.params.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      if (user.role === "admin") {
+        return res
+          .status(400)
+          .json({ message: "Cannot delete an administrator." });
+      }
+
+      await User.findByIdAndDelete(req.params.id);
+      await Resource.deleteMany({ userId: req.params.id });
+      await Review.deleteMany({
+        $or: [{ sellerId: req.params.id }, { reviewerId: req.params.id }],
+      });
+
+      res.json({
+        message: "User and associated resources deleted successfully.",
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
 
 // ============================================================
 // ========== CHAT ROUTES ==========
@@ -1042,9 +1168,6 @@ app.delete("/api/admin/users/:id", authenticateToken, requireAdmin, async (req, 
 app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.json([]);
-    }
 
     const messages = await Message.find({
       $or: [{ senderId: userId }, { receiverId: userId }],
@@ -1058,24 +1181,15 @@ app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
       const rId = msg.receiverId.toString();
       const partnerId = sId === userId ? rId : sId;
 
-      if (!partnerId || !mongoose.Types.ObjectId.isValid(partnerId)) continue;
-
       if (!conversations[partnerId]) {
-        let partner = null;
-        try {
-          partner = await User.findById(partnerId).select("name email avatar");
-        } catch (e) {
-          partner = null;
-        }
-
+        const partner =
+          await User.findById(partnerId).select("name email avatar");
         const partnerName = partner ? partner.name : "Student (Inactive)";
-        const partnerEmail = partner ? partner.email : "";
         const partnerAvatar = partner ? partner.avatar || "" : "";
 
         conversations[partnerId] = {
           userId: partnerId,
           name: partnerName,
-          email: partnerEmail,
           avatar: partnerAvatar,
           lastMessage: msg.content || "",
           lastMessageTime: msg.createdAt,
@@ -1084,45 +1198,50 @@ app.get("/api/chat/conversations", authenticateToken, async (req, res) => {
         };
       } else {
         if (sId !== userId && !msg.read) {
-          conversations[partnerId].unread = (conversations[partnerId].unread || 0) + 1;
+          conversations[partnerId].unread =
+            (conversations[partnerId].unread || 0) + 1;
         }
       }
     }
 
     const result = Object.values(conversations).sort(
-      (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
+      (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime),
     );
 
     res.json(result);
   } catch (err) {
-    console.error("Conversations route error:", err);
-    res.status(500).json({ message: "Failed to load conversations: " + err.message });
-  }
-});
-
-app.get("/api/chat/messages/:userId/:resourceId", authenticateToken, async (req, res) => {
-  try {
-    const { userId, resourceId } = req.params;
-    const currentUserId = req.user.id;
-
-    const messages = await Message.find({
-      resourceId: resourceId,
-      $or: [
-        { senderId: currentUserId, receiverId: userId },
-        { senderId: userId, receiverId: currentUserId },
-      ],
-    }).sort({ createdAt: 1 });
-
-    await Message.updateMany(
-      { senderId: userId, receiverId: currentUserId, read: false },
-      { read: true }
-    );
-
-    res.json(messages);
-  } catch (err) {
+    console.error("Conversations error:", err);
     res.status(500).json({ message: err.message });
   }
 });
+
+app.get(
+  "/api/chat/messages/:userId/:resourceId",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { userId, resourceId } = req.params;
+      const currentUserId = req.user.id;
+
+      const messages = await Message.find({
+        resourceId: resourceId,
+        $or: [
+          { senderId: currentUserId, receiverId: userId },
+          { senderId: userId, receiverId: currentUserId },
+        ],
+      }).sort({ createdAt: 1 });
+
+      await Message.updateMany(
+        { senderId: userId, receiverId: currentUserId, read: false },
+        { read: true },
+      );
+
+      res.json(messages);
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
 
 app.post("/api/chat/messages", authenticateToken, async (req, res) => {
   try {
@@ -1142,8 +1261,10 @@ app.post("/api/chat/messages", authenticateToken, async (req, res) => {
     });
 
     await newMessage.save();
-
-    const populated = await Message.findById(newMessage._id).populate("senderId", "name avatar");
+    const populated = await Message.findById(newMessage._id).populate(
+      "senderId",
+      "name avatar",
+    );
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -1167,5 +1288,5 @@ app.get("/api/chat/unread", authenticateToken, async (req, res) => {
 // ============================================================
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 eduResourceMine Server running on http://localhost:${PORT}`);
 });
