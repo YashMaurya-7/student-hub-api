@@ -5,9 +5,11 @@ const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const compression = require("compression");
 require("dotenv").config();
 
 const app = express();
+app.use(compression());
 app.use(
   cors({
     origin: "*",
@@ -188,6 +190,17 @@ const offerSchema = new mongoose.Schema(
 );
 
 const Offer = mongoose.model("Offer", offerSchema);
+
+// Optimized MongoDB Database Indexes for High-Speed Queries
+resourceSchema.index({ createdAt: -1 });
+resourceSchema.index({ status: 1, createdAt: -1 });
+resourceSchema.index({ userId: 1, createdAt: -1 });
+resourceSchema.index({ type: 1, subject: 1 });
+messageSchema.index({ senderId: 1, receiverId: 1, resourceId: 1, createdAt: 1 });
+messageSchema.index({ receiverId: 1, read: 1 });
+reviewSchema.index({ sellerId: 1, createdAt: -1 });
+offerSchema.index({ sellerId: 1, createdAt: -1 });
+offerSchema.index({ buyerId: 1, createdAt: -1 });
 
 // ============================================================
 // ========== MIDDLEWARE ==========
@@ -577,9 +590,14 @@ app.post("/api/wishlist/:id", authenticateToken, async (req, res) => {
 app.get("/api/resources", async (req, res) => {
   try {
     const filter = { status: { $ne: "rejected" } };
+    // Project only necessary fields (exclude full gallery images from initial list view to drastically reduce payload size)
     const resources = await Resource.find(filter)
+      .select("-images")
       .populate("userId", "name email avatar college")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.set("Cache-Control", "public, max-age=10, stale-while-revalidate=60");
     res.json(resources);
   } catch (err) {
     res.status(500).json({ message: err.message });
