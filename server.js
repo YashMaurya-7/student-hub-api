@@ -1,4 +1,5 @@
 // backend/server.js
+const http = require("http");
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -6,9 +7,19 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const compression = require("compression");
+const { Server } = require("socket.io");
 require("dotenv").config();
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  },
+});
+
 app.use(compression());
 app.use(
   cors({
@@ -245,6 +256,64 @@ const requireAdmin = (req, res, next) => {
   }
   next();
 };
+
+// ============================================================
+// ========== REAL-TIME SOCKET.IO NOTIFICATIONS & MESSAGING ==========
+// ============================================================
+
+io.use((socket, next) => {
+  const token =
+    socket.handshake.auth?.token ||
+    socket.handshake.query?.token ||
+    socket.handshake.headers?.authorization?.split(" ")[1];
+
+  if (!token) {
+    return next(new Error("Authentication token required"));
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    socket.userId = decoded.id;
+    next();
+  } catch (err) {
+    next(new Error("Invalid or expired token"));
+  }
+});
+
+io.on("connection", (socket) => {
+  const userRoom = `user_${socket.userId}`;
+  socket.join(userRoom);
+
+  socket.on("join_conversation", ({ partnerId, resourceId }) => {
+    if (partnerId && resourceId) {
+      const convRoom =
+        [socket.userId, partnerId].sort().join("_") + `_${resourceId}`;
+      socket.join(convRoom);
+    }
+  });
+
+  socket.on("leave_conversation", ({ partnerId, resourceId }) => {
+    if (partnerId && resourceId) {
+      const convRoom =
+        [socket.userId, partnerId].sort().join("_") + `_${resourceId}`;
+      socket.leave(convRoom);
+    }
+  });
+});
+
+// Helper to broadcast real-time unread notifications to a specific user
+async function emitUnreadCount(userId) {
+  if (!userId) return;
+  try {
+    const count = await Message.countDocuments({
+      receiverId: userId,
+      read: false,
+    });
+    io.to(`user_${userId}`).emit("unread_count_update", { unreadCount: count });
+  } catch (err) {
+    console.error("Error emitting unread count:", err);
+  }
+}
 
 // ============================================================
 // ========== ROOT & HEALTH ==========
@@ -834,8 +903,27 @@ app.post(
         senderId: req.user.id,
         receiverId: seller._id,
         content: `Hi! I'm interested in purchasing "${resource.title}" for ₹${resource.price}. Please let me know how we can coordinate.`,
+        read: false,
       });
       await chatMsg.save();
+
+      const populatedChatMsg = await Message.findById(chatMsg._id).populate(
+        "senderId",
+        "name avatar email",
+      );
+
+      // Real-time broadcast notification to the seller in 0ms!
+      const sellerUnreadCount = await Message.countDocuments({
+        receiverId: seller._id,
+        read: false,
+      });
+      io.to(`user_${seller._id}`).emit("new_message", {
+        message: populatedChatMsg,
+        unreadCount: sellerUnreadCount,
+        resourceId: resource.id,
+        senderId: req.user.id,
+        senderName: buyer.name,
+      });
 
       res.json({
         message:
@@ -1250,11 +1338,53 @@ app.get(
       }).sort({ createdAt: 1 });
 
       await Message.updateMany(
-        { senderId: userId, receiverId: currentUserId, read: false },
+        {
+          senderId: userId,
+          receiverId: currentUserId,
+          resourceId: resourceId,
+          read: false,
+        },
         { read: true },
       );
 
+      // Real-time update receiver's unread badge (clears to 0 for this conversation)
+      emitUnreadCount(currentUserId);
+
       res.json(messages);
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// Real-time Mark As Read Endpoint
+app.put(
+  "/api/chat/read/:userId/:resourceId",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { userId, resourceId } = req.params;
+      const currentUserId = req.user.id;
+
+      await Message.updateMany(
+        {
+          senderId: userId,
+          receiverId: currentUserId,
+          resourceId: resourceId,
+          read: false,
+        },
+        { read: true },
+      );
+
+      const unreadCount = await Message.countDocuments({
+        receiverId: currentUserId,
+        read: false,
+      });
+
+      io.to(`user_${currentUserId}`).emit("unread_count_update", {
+        unreadCount,
+      });
+      res.json({ success: true, unreadCount });
     } catch (err) {
       res.status(500).json({ message: err.message });
     }
@@ -1281,8 +1411,29 @@ app.post("/api/chat/messages", authenticateToken, async (req, res) => {
     await newMessage.save();
     const populated = await Message.findById(newMessage._id).populate(
       "senderId",
-      "name avatar",
+      "name avatar email",
     );
+
+    // 1. Compute receiver's real-time unread messages count
+    const receiverUnreadCount = await Message.countDocuments({
+      receiverId,
+      read: false,
+    });
+
+    // 2. Real-time emit to receiver's private room (instantly updates their existing message bar badge)
+    io.to(`user_${receiverId}`).emit("new_message", {
+      message: populated,
+      unreadCount: receiverUnreadCount,
+      resourceId,
+      senderId: req.user.id,
+      senderName: req.user.name,
+    });
+
+    // 3. Real-time emit to active conversation room (for instant in-chat message appending)
+    const convRoom =
+      [senderId, receiverId].sort().join("_") + `_${resourceId}`;
+    io.to(convRoom).emit("chat_message", populated);
+
     res.status(201).json(populated);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -1305,6 +1456,6 @@ app.get("/api/chat/unread", authenticateToken, async (req, res) => {
 // ========== SERVER START ==========
 // ============================================================
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`🚀 eduResourceMine Server running on http://localhost:${PORT}`);
 });
