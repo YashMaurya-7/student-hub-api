@@ -97,11 +97,50 @@ const userSchema = new mongoose.Schema(
     wishlist: { type: [String], default: [] },
     resetPasswordOTP: { type: String },
     resetPasswordExpires: { type: Date },
+    // Verified Seller Membership
+    isVerifiedSeller: { type: Boolean, default: false },
+    membershipStatus: {
+      type: String,
+      enum: ["inactive", "active", "expired", "cancelled"],
+      default: "inactive",
+    },
+    membershipPlan: { type: String, default: "" },
+    membershipPrice: { type: Number, default: 99 },
+    membershipStartDate: { type: Date },
+    membershipExpiryDate: { type: Date },
+    paymentId: { type: String, default: "" },
+    autoRenew: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
 
 const User = mongoose.model("User", userSchema);
+
+const paymentSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    orderId: { type: String, required: true, unique: true },
+    paymentId: { type: String, default: "" },
+    signature: { type: String, default: "" },
+    amount: { type: Number, required: true }, // in INR
+    currency: { type: String, default: "INR" },
+    planId: { type: String, default: "monthly" },
+    status: {
+      type: String,
+      enum: ["created", "success", "failed", "cancelled"],
+      default: "created",
+    },
+    paymentMethod: { type: String, default: "UPI / Card" },
+    receipt: { type: String, default: "" },
+  },
+  { timestamps: true },
+);
+
+const Payment = mongoose.model("Payment", paymentSchema);
 
 const resourceSchema = new mongoose.Schema(
   {
@@ -408,6 +447,10 @@ app.post("/api/auth/login", async (req, res) => {
         bio: user.bio || "",
         college: user.college || "",
         phone: user.phone || "",
+        isVerifiedSeller: isUserVerifiedSeller(user),
+        membershipStatus: user.membershipStatus || "inactive",
+        membershipPlan: user.membershipPlan || "",
+        membershipExpiryDate: user.membershipExpiryDate || null,
       },
     });
   } catch (err) {
@@ -419,7 +462,19 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
     if (!user) return res.status(404).json({ message: "User not found" });
-    res.json(user);
+
+    // Auto-check expiry
+    if (user.membershipExpiryDate && new Date() > new Date(user.membershipExpiryDate)) {
+      if (user.isVerifiedSeller || user.membershipStatus === "active") {
+        user.isVerifiedSeller = false;
+        user.membershipStatus = "expired";
+        await user.save();
+      }
+    }
+
+    const userObj = user.toObject();
+    userObj.isVerifiedSeller = isUserVerifiedSeller(user);
+    res.json(userObj);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -450,6 +505,8 @@ app.put("/api/users/profile", authenticateToken, async (req, res) => {
         bio: user.bio,
         college: user.college,
         phone: user.phone,
+        isVerifiedSeller: isUserVerifiedSeller(user),
+        membershipStatus: user.membershipStatus || "inactive",
       },
     });
   } catch (err) {
@@ -460,9 +517,12 @@ app.put("/api/users/profile", authenticateToken, async (req, res) => {
 app.get("/api/users/:id", async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select(
-      "name email avatar bio college createdAt",
+      "name email avatar bio college isVerifiedSeller membershipStatus membershipExpiryDate createdAt",
     );
     if (!user) return res.status(404).json({ message: "User not found" });
+
+    const userObj = user.toObject();
+    userObj.isVerifiedSeller = isUserVerifiedSeller(user);
 
     const listings = await Resource.find({
       userId: user._id,
@@ -596,6 +656,328 @@ app.post("/api/auth/reset-password", async (req, res) => {
 });
 
 // ============================================================
+// ========== VERIFIED SELLER MEMBERSHIP & PAYMENT ==========
+// ============================================================
+
+const PAYMENT_SECRET =
+  process.env.PAYMENT_SECRET || "edu_verified_membership_secret_2026_x99";
+
+const MEMBERSHIP_PLANS = {
+  monthly: {
+    id: "monthly",
+    name: "Verified Seller Monthly",
+    price: 99, // ₹99 / month
+    currency: "INR",
+    durationDays: 30,
+    features: [
+      "Verified Seller badge",
+      "Verified label on seller profile",
+      "Verified label on seller's uploaded resources",
+      "Better visibility for resources",
+      "Priority placement in relevant resource listings",
+      "Seller analytics",
+      "Priority support",
+    ],
+  },
+};
+
+function isUserVerifiedSeller(user) {
+  if (!user) return false;
+  if (!user.isVerifiedSeller) return false;
+  if (
+    user.membershipExpiryDate &&
+    new Date() > new Date(user.membershipExpiryDate)
+  ) {
+    return false;
+  }
+  return (
+    user.membershipStatus === "active" || user.membershipStatus === "cancelled"
+  );
+}
+
+function generatePaymentSignature(orderId, paymentId) {
+  return crypto
+    .createHmac("sha256", PAYMENT_SECRET)
+    .update(`${orderId}|${paymentId}`)
+    .digest("hex");
+}
+
+// 1. Create Membership Order
+app.post("/api/membership/create-order", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const plan = MEMBERSHIP_PLANS.monthly;
+    const timestamp = Date.now();
+    const randomHex = crypto.randomBytes(4).toString("hex");
+    const orderId = `order_${timestamp}_${randomHex}`;
+
+    const payment = new Payment({
+      userId: user._id,
+      orderId,
+      amount: plan.price,
+      currency: plan.currency,
+      planId: plan.id,
+      status: "created",
+      receipt: `RCPT-${timestamp.toString().slice(-6)}`,
+    });
+    await payment.save();
+
+    res.json({
+      orderId,
+      amount: plan.price,
+      currency: plan.currency,
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        features: plan.features,
+      },
+      key: process.env.RAZORPAY_KEY_ID || "rzp_test_edu_resource_mine",
+      mode: process.env.RAZORPAY_KEY_ID ? "live" : "sandbox",
+    });
+  } catch (err) {
+    console.error("Create membership order error:", err);
+    res.status(500).json({ message: "Failed to create membership order." });
+  }
+});
+
+// 2. Gateway Simulator for Test/Sandbox (Generates authentic cryptographic signature)
+app.post(
+  "/api/membership/simulate-payment",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { orderId, paymentMethod } = req.body;
+      const payment = await Payment.findOne({
+        orderId,
+        userId: req.user.id,
+        status: "created",
+      });
+
+      if (!payment) {
+        return res
+          .status(400)
+          .json({ message: "Invalid or expired order for simulation." });
+      }
+
+      const paymentId = `pay_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+      const signature = generatePaymentSignature(orderId, paymentId);
+
+      res.json({
+        orderId,
+        paymentId,
+        signature,
+        paymentMethod: paymentMethod || "UPI",
+        status: "simulated_success",
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 3. Verify Payment & Activate Membership (Server-Side Validation)
+app.post(
+  "/api/membership/verify-payment",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { orderId, paymentId, signature, paymentMethod } = req.body;
+
+      if (!orderId || !paymentId || !signature) {
+        return res
+          .status(400)
+          .json({ message: "Order ID, Payment ID, and Signature are required." });
+      }
+
+      const payment = await Payment.findOne({
+        orderId,
+        userId: req.user.id,
+        status: "created",
+      });
+
+      if (!payment) {
+        return res
+          .status(400)
+          .json({ message: "Order not found or has already been processed." });
+      }
+
+      // Cryptographic signature validation
+      let isSignatureValid = false;
+      if (process.env.RAZORPAY_KEY_SECRET) {
+        const expected = crypto
+          .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+          .update(`${orderId}|${paymentId}`)
+          .digest("hex");
+        isSignatureValid = expected === signature;
+      } else {
+        const expected = generatePaymentSignature(orderId, paymentId);
+        isSignatureValid = expected === signature;
+      }
+
+      if (!isSignatureValid) {
+        payment.status = "failed";
+        await payment.save();
+        return res.status(400).json({
+          message:
+            "Payment verification failed: Invalid cryptographic payment signature.",
+        });
+      }
+
+      // Mark payment as successful
+      payment.status = "success";
+      payment.paymentId = paymentId;
+      payment.signature = signature;
+      payment.paymentMethod = paymentMethod || "UPI / Card";
+      await payment.save();
+
+      // Activate User Membership
+      const user = await User.findById(req.user.id);
+      const now = new Date();
+      let startDate = now;
+      let expiryDate;
+
+      // Extend if user is already verified and has remaining time
+      if (
+        user.membershipExpiryDate &&
+        new Date(user.membershipExpiryDate) > now
+      ) {
+        startDate = user.membershipStartDate || now;
+        expiryDate = new Date(
+          new Date(user.membershipExpiryDate).getTime() + 30 * 24 * 60 * 60 * 1000,
+        );
+      } else {
+        expiryDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      }
+
+      user.isVerifiedSeller = true;
+      user.membershipStatus = "active";
+      user.membershipPlan = "monthly";
+      user.membershipPrice = 99;
+      user.membershipStartDate = startDate;
+      user.membershipExpiryDate = expiryDate;
+      user.paymentId = paymentId;
+      user.autoRenew = true;
+      await user.save();
+
+      const sanitizedUser = user.toObject();
+      delete sanitizedUser.password;
+
+      res.json({
+        success: true,
+        message: "Congratulations! You are now a Verified Seller.",
+        isVerifiedSeller: true,
+        user: sanitizedUser,
+        membership: {
+          status: user.membershipStatus,
+          plan: user.membershipPlan,
+          price: user.membershipPrice,
+          startDate: user.membershipStartDate,
+          expiryDate: user.membershipExpiryDate,
+          validUntil: user.membershipExpiryDate,
+          paymentId: user.paymentId,
+        },
+      });
+    } catch (err) {
+      console.error("Verify payment error:", err);
+      res.status(500).json({ message: "Server error during payment verification." });
+    }
+  },
+);
+
+// 4. Get Membership Status
+app.get("/api/membership/status", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    const now = new Date();
+    // Expiry check
+    if (user.membershipExpiryDate && now > new Date(user.membershipExpiryDate)) {
+      if (user.isVerifiedSeller || user.membershipStatus === "active") {
+        user.isVerifiedSeller = false;
+        user.membershipStatus = "expired";
+        await user.save();
+      }
+    }
+
+    const isVerified = isUserVerifiedSeller(user);
+    const plan = MEMBERSHIP_PLANS.monthly;
+
+    res.json({
+      isVerifiedSeller: isVerified,
+      isVerified: isVerified,
+      membershipStatus: user.membershipStatus || "inactive",
+      status: user.membershipStatus || "inactive",
+      membershipPlan: user.membershipPlan || "monthly",
+      plan: user.membershipPlan || "monthly",
+      membershipPrice: user.membershipPrice || 99,
+      price: user.membershipPrice || 99,
+      membershipStartDate: user.membershipStartDate || null,
+      membershipExpiryDate: user.membershipExpiryDate || null,
+      expiryDate: user.membershipExpiryDate || null,
+      autoRenew: user.autoRenew || false,
+      paymentId: user.paymentId || "",
+      planDetails: {
+        id: plan.id,
+        name: plan.name,
+        price: plan.price,
+        features: plan.features,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// 5. Cancel Membership (Retains verified status until expiry date)
+app.post("/api/membership/cancel", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
+
+    if (user.membershipStatus !== "active") {
+      return res
+        .status(400)
+        .json({ message: "No active membership to cancel." });
+    }
+
+    user.membershipStatus = "cancelled";
+    user.autoRenew = false;
+    await user.save();
+
+    const sanitizedUser = user.toObject();
+    delete sanitizedUser.password;
+
+    res.json({
+      success: true,
+      message:
+        "Your membership renewal has been cancelled. You will remain a Verified Seller until your current paid period ends.",
+      status: "cancelled",
+      validUntil: user.membershipExpiryDate,
+      user: sanitizedUser,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// 6. Payment History
+app.get("/api/membership/history", authenticateToken, async (req, res) => {
+  try {
+    const payments = await Payment.find({ userId: req.user.id })
+      .sort({ createdAt: -1 })
+      .select("orderId paymentId amount currency planId status paymentMethod receipt createdAt");
+
+    res.json({ success: true, payments });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ============================================================
 // ========== WISHLIST ==========
 // ============================================================
 
@@ -662,11 +1044,24 @@ app.get("/api/resources", async (req, res) => {
     // Project only necessary fields (exclude full gallery images from initial list view to drastically reduce payload size)
     const resources = await Resource.find(filter)
       .select("-images")
-      .populate("userId", "name email avatar college")
+      .populate(
+        "userId",
+        "name email avatar college isVerifiedSeller membershipStatus membershipExpiryDate",
+      )
       .sort({ createdAt: -1 })
       .lean();
 
-    res.set("Cache-Control", "public, max-age=10, stale-while-revalidate=60");
+    // Controlled Priority Placement: Active verified sellers' listings receive transparent priority tier
+    resources.sort((a, b) => {
+      const aVerified = isUserVerifiedSeller(a.userId);
+      const bVerified = isUserVerifiedSeller(b.userId);
+
+      if (aVerified && !bVerified) return -1;
+      if (!aVerified && bVerified) return 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    res.set("Cache-Control", "public, max-age=5, stale-while-revalidate=30");
     res.json(resources);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -679,7 +1074,10 @@ app.get("/api/resources/:id", async (req, res) => {
       { id: req.params.id },
       { $inc: { views: 1 } },
       { new: true },
-    ).populate("userId", "name email avatar college");
+    ).populate(
+      "userId",
+      "name email avatar college isVerifiedSeller membershipStatus membershipExpiryDate",
+    );
 
     if (!resource)
       return res.status(404).json({ message: "Resource not found" });
