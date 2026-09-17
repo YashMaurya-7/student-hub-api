@@ -1,5 +1,6 @@
 // backend/server.js
 const http = require("http");
+const path = require("path");
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
@@ -9,6 +10,7 @@ const crypto = require("crypto");
 const compression = require("compression");
 const { Server } = require("socket.io");
 require("dotenv").config();
+const aiRecommender = require("./aiRecommender");
 
 const app = express();
 const server = http.createServer(app);
@@ -23,10 +25,20 @@ const io = new Server(server, {
 app.use(compression());
 app.use(
   cors({
-    origin: "*",
+    origin: true,
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   }),
 );
+
+app.use((req, res, next) => {
+  if (req.url && req.url.startsWith("/api/")) {
+    console.log(`📡 [${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
+  }
+  next();
+});
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
@@ -116,6 +128,170 @@ const userSchema = new mongoose.Schema(
 
 const User = mongoose.model("User", userSchema);
 
+// ============================================================
+// ========== OWNER ADMIN INITIALIZATION ==========
+// ============================================================
+async function initOwnerAdminAccount() {
+  try {
+    const adminEmail = (
+      process.env.ADMIN_EMAIL || "admin@eduresourcemine.com"
+    )
+      .toLowerCase()
+      .trim();
+    const adminPassword = process.env.ADMIN_PASSWORD || "AdminPass2026!";
+    const adminName = process.env.ADMIN_NAME || "eduResourceMine Admin";
+
+    let adminUser = await User.findOne({ email: adminEmail });
+    if (!adminUser) {
+      const hashedPassword = await bcrypt.hash(adminPassword, 10);
+      adminUser = new User({
+        name: adminName,
+        email: adminEmail,
+        password: hashedPassword,
+        role: "admin",
+        isBlocked: false,
+      });
+      await adminUser.save();
+      console.log(`👑 Initialized Owner Admin account: ${adminEmail}`);
+    } else {
+      let changed = false;
+      if (adminUser.role !== "admin") {
+        adminUser.role = "admin";
+        changed = true;
+      }
+      if (adminUser.isBlocked) {
+        adminUser.isBlocked = false;
+        changed = true;
+      }
+      if (changed) {
+        await adminUser.save();
+        console.log(`👑 Updated account role to admin: ${adminEmail}`);
+      } else {
+        console.log(`👑 Owner Admin account verified: ${adminEmail}`);
+      }
+    }
+    await seedStarterResources();
+  } catch (err) {
+    console.error("⚠️ Failed to initialize owner admin account:", err.message);
+  }
+}
+
+async function seedStarterResources() {
+  try {
+    const mlCount = await Resource.countDocuments({
+      $or: [{ subject: "Machine Learning" }, { title: /Machine Learning/i }],
+    });
+    if (mlCount === 0) {
+      const adminUser = await User.findOne({ role: "admin" });
+      const ownerId = adminUser ? adminUser._id : new mongoose.Types.ObjectId();
+
+      const starters = [
+        {
+          id: "res_ml_complete_notes",
+          title: "Machine Learning Complete Notes",
+          type: "note",
+          subject: "Machine Learning",
+          price: 0,
+          condition: "Digital Edition",
+          description:
+            "Comprehensive, beginner-friendly Machine Learning notes covering Regression, Classification, Decision Trees, and Neural Networks. Perfect for beginner students and exam preparation.",
+          image:
+            "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=500&auto=format&fit=crop&q=60",
+          userId: ownerId,
+          semester: "Semester 3",
+          branch: "AI & DS",
+          university: "SPPU",
+          difficulty: "Beginner",
+          tags: ["Machine Learning", "Notes", "SPPU", "AI & DS", "Beginner", "Exam Prep"],
+          views: 142,
+          downloads: 48,
+          isFeatured: true,
+          status: "approved",
+        },
+        {
+          id: "res_ml_imp_questions",
+          title: "Machine Learning Important Questions",
+          type: "question_bank",
+          subject: "Machine Learning",
+          price: 0,
+          condition: "Digital Edition",
+          description:
+            "Curated high-weightage question bank with step-by-step solutions for frequent university exam topics in SPPU AI & DS.",
+          image:
+            "https://images.unsplash.com/photo-1517842645767-c639042777db?w=500&auto=format&fit=crop&q=60",
+          userId: ownerId,
+          semester: "Semester 3",
+          branch: "AI & DS",
+          university: "SPPU",
+          difficulty: "Beginner",
+          tags: ["Machine Learning", "Question Bank", "Important Questions", "SPPU", "AI & DS"],
+          views: 110,
+          downloads: 39,
+          isFeatured: true,
+          status: "approved",
+        },
+        {
+          id: "res_ml_pyqs",
+          title: "Machine Learning Previous Year Questions",
+          type: "pyq",
+          subject: "Machine Learning",
+          price: 0,
+          condition: "Digital Edition",
+          description:
+            "Last 5 years solved university PYQ question papers with step-by-step answers and marking schemes for SPPU AI & DS Semester 3.",
+          image:
+            "https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=500&auto=format&fit=crop&q=60",
+          userId: ownerId,
+          semester: "Semester 3",
+          branch: "AI & DS",
+          university: "SPPU",
+          difficulty: "Beginner",
+          tags: ["Machine Learning", "PYQ", "Previous Year Questions", "SPPU", "Past Papers"],
+          views: 198,
+          downloads: 75,
+          isFeatured: true,
+          status: "approved",
+        },
+        {
+          id: "res_dsa_sppu_notes",
+          title: "SPPU AI & DS Semester 3 DSA Material",
+          type: "note",
+          subject: "Data Structures",
+          price: 0,
+          condition: "Digital Edition",
+          description:
+            "Beginner-friendly comprehensive Data Structures and Algorithms material tailored for SPPU AI & DS syllabus. Covers arrays, linked lists, trees, and graphs.",
+          image:
+            "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=500&auto=format&fit=crop&q=60",
+          userId: ownerId,
+          semester: "Semester 3",
+          branch: "AI & DS",
+          university: "SPPU",
+          difficulty: "Beginner",
+          tags: ["Data Structures", "DSA", "SPPU", "AI & DS", "Semester 3", "Study Material"],
+          views: 220,
+          downloads: 90,
+          isFeatured: true,
+          status: "approved",
+        },
+      ];
+
+      await Resource.insertMany(starters);
+      console.log("📚 Seeded starter educational resources for AI recommendation!");
+    }
+  } catch (err) {
+    console.error("⚠️ Error seeding starter resources:", err.message);
+  }
+}
+
+if (mongoose.connection.readyState === 1) {
+  initOwnerAdminAccount();
+} else {
+  mongoose.connection.once("open", () => {
+    initOwnerAdminAccount();
+  });
+}
+
 const paymentSchema = new mongoose.Schema(
   {
     userId: {
@@ -146,7 +322,7 @@ const resourceSchema = new mongoose.Schema(
   {
     id: { type: String, required: true, unique: true },
     title: { type: String, required: true, trim: true },
-    type: { type: String, enum: ["note", "book"], required: true },
+    type: { type: String, required: true },
     subject: { type: String, default: "General", trim: true },
     price: { type: Number, required: true, min: 0 },
     condition: { type: String, required: true },
@@ -159,7 +335,17 @@ const resourceSchema = new mongoose.Schema(
       required: true,
     },
     views: { type: Number, default: 0 },
+    downloads: { type: Number, default: 0 },
     isSold: { type: Boolean, default: false },
+    isFeatured: { type: Boolean, default: false },
+    semester: { type: String, default: "Semester 1", trim: true },
+    branch: { type: String, default: "General", trim: true },
+    university: { type: String, default: "", trim: true },
+    difficulty: { type: String, default: "Beginner", trim: true },
+    tags: { type: [String], default: [] },
+    topics: { type: [String], default: [] },
+    fileUrl: { type: String, default: "" },
+    fileName: { type: String, default: "" },
     status: {
       type: String,
       enum: ["approved", "pending", "rejected"],
@@ -170,6 +356,52 @@ const resourceSchema = new mongoose.Schema(
 );
 
 const Resource = mongoose.model("Resource", resourceSchema);
+
+const reportSchema = new mongoose.Schema(
+  {
+    resourceId: { type: String, required: true },
+    resourceTitle: { type: String, default: "" },
+    reporterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    reason: {
+      type: String,
+      required: true,
+    },
+    details: { type: String, default: "" },
+    status: {
+      type: String,
+      enum: ["pending", "resolved", "dismissed"],
+      default: "pending",
+    },
+    resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    resolvedAt: { type: Date },
+  },
+  { timestamps: true },
+);
+
+const Report = mongoose.model("Report", reportSchema);
+
+const settingSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, unique: true },
+    value: { type: mongoose.Schema.Types.Mixed, required: true },
+  },
+  { timestamps: true },
+);
+
+const Setting = mongoose.model("Setting", settingSchema);
+
+async function getSetting(key, defaultValue) {
+  try {
+    const s = await Setting.findOne({ key });
+    return s ? s.value : defaultValue;
+  } catch (err) {
+    return defaultValue;
+  }
+}
 
 const messageSchema = new mongoose.Schema(
   {
@@ -246,6 +478,10 @@ resourceSchema.index({ createdAt: -1 });
 resourceSchema.index({ status: 1, createdAt: -1 });
 resourceSchema.index({ userId: 1, createdAt: -1 });
 resourceSchema.index({ type: 1, subject: 1 });
+resourceSchema.index({ isFeatured: 1 });
+resourceSchema.index({ semester: 1, branch: 1 });
+reportSchema.index({ status: 1, createdAt: -1 });
+reportSchema.index({ resourceId: 1 });
 messageSchema.index({ senderId: 1, receiverId: 1, resourceId: 1, createdAt: 1 });
 messageSchema.index({ receiverId: 1, read: 1 });
 reviewSchema.index({ sellerId: 1, createdAt: -1 });
@@ -452,6 +688,70 @@ app.post("/api/auth/login", async (req, res) => {
         membershipPlan: user.membershipPlan || "",
         membershipExpiryDate: user.membershipExpiryDate || null,
       },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.post("/api/auth/admin-login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ message: "Admin email and password are required." });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      return res
+        .status(401)
+        .json({ message: "Invalid administrator credentials." });
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).json({
+        message: "This administrator account has been blocked.",
+      });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res
+        .status(401)
+        .json({ message: "Invalid administrator credentials." });
+    }
+
+    // STRICT ADMIN ROLE CHECK: Non-admin users are rejected with 403 Forbidden
+    if (user.role !== "admin") {
+      return res.status(403).json({
+        message:
+          "Access Denied: This account does not have administrator privileges.",
+      });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: "7d" },
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar || "",
+        bio: user.bio || "",
+        college: user.college || "",
+        phone: user.phone || "",
+        isVerifiedSeller: isUserVerifiedSeller(user),
+        membershipStatus: user.membershipStatus || "inactive",
+      },
+      message: "Admin authentication successful.",
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -1038,12 +1338,33 @@ app.post("/api/wishlist/:id", authenticateToken, async (req, res) => {
 // ========== RESOURCE ROUTES ==========
 // ============================================================
 
+// Lightweight in-memory catalog cache for near-instant resource loading (< 5ms)
+let resourceCatalogCache = {
+  data: null,
+  timestamp: 0,
+  ttl: 30000, // 30 seconds TTL
+};
+
+function invalidateResourceCache() {
+  resourceCatalogCache.data = null;
+  resourceCatalogCache.timestamp = 0;
+}
+
 app.get("/api/resources", async (req, res) => {
   try {
+    const now = Date.now();
+    if (
+      resourceCatalogCache.data &&
+      now - resourceCatalogCache.timestamp < resourceCatalogCache.ttl
+    ) {
+      res.set("Cache-Control", "public, max-age=5, stale-while-revalidate=30");
+      return res.json(resourceCatalogCache.data);
+    }
+
     const filter = { status: { $ne: "rejected" } };
-    // Project only necessary fields (exclude full gallery images from initial list view to drastically reduce payload size)
+    // Project only necessary fields (exclude full gallery images and large fileUrls from initial list view to drastically reduce payload size)
     const resources = await Resource.find(filter)
-      .select("-images")
+      .select("-images -fileUrl")
       .populate(
         "userId",
         "name email avatar college isVerifiedSeller membershipStatus membershipExpiryDate",
@@ -1060,6 +1381,9 @@ app.get("/api/resources", async (req, res) => {
       if (!aVerified && bVerified) return 1;
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
+
+    resourceCatalogCache.data = resources;
+    resourceCatalogCache.timestamp = now;
 
     res.set("Cache-Control", "public, max-age=5, stale-while-revalidate=30");
     res.json(resources);
@@ -1133,22 +1457,40 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
       galleryImages = [coverImage];
     }
 
+    const manualApproval = await getSetting("manualApprovalRequired", true);
+    const initialStatus =
+      req.user.role === "admin" || !manualApproval ? "approved" : "pending";
+
+    const {
+      semester,
+      branch,
+      fileUrl,
+      fileName,
+    } = req.body;
+
     const newResource = new Resource({
       id: id || Date.now().toString(),
       title: title.trim(),
       type,
-      subject: subject ? subject.trim() : "General",
+      subject: subject ? String(subject).trim() : "General",
+      semester: semester ? String(semester).trim() : "Semester 1",
+      branch: branch ? String(branch).trim() : "General",
       price: Number(price),
       condition,
       description: description ? description.trim() : "",
       image: coverImage,
       images: galleryImages,
+      fileUrl: fileUrl || "",
+      fileName: fileName || "",
+      downloads: 0,
+      isFeatured: false,
       userId: req.user.id,
       isSold: false,
-      status: "approved",
+      status: initialStatus,
     });
 
     const saved = await newResource.save();
+    invalidateResourceCache();
     const populated = await Resource.findById(saved._id).populate(
       "userId",
       "name email avatar",
@@ -1157,6 +1499,61 @@ app.post("/api/resources", authenticateToken, async (req, res) => {
   } catch (err) {
     console.error("Create resource error:", err);
     res.status(400).json({ message: err.message });
+  }
+});
+
+// Download tracking endpoint
+app.get("/api/resources/:id/download", async (req, res) => {
+  try {
+    const resource = await Resource.findOneAndUpdate(
+      { id: req.params.id },
+      { $inc: { downloads: 1 } },
+      { new: true },
+    );
+    if (!resource)
+      return res.status(404).json({ message: "Resource not found" });
+
+    res.json({
+      success: true,
+      downloads: resource.downloads,
+      fileUrl: resource.fileUrl || resource.image,
+      fileName: resource.fileName || `${resource.title}.pdf`,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// User resource reporting endpoint
+app.post("/api/resources/:id/report", authenticateToken, async (req, res) => {
+  try {
+    const { reason, details, description } = req.body;
+    if (!reason) {
+      return res.status(400).json({ message: "Report reason is required." });
+    }
+
+    const resource = await Resource.findOne({ id: req.params.id });
+    if (!resource)
+      return res.status(404).json({ message: "Resource not found" });
+
+    const report = new Report({
+      resourceId: resource.id,
+      resourceTitle: resource.title,
+      reporterId: req.user.id,
+      reason,
+      details: details ? details.trim() : (description ? description.trim() : ""),
+      status: "pending",
+    });
+
+    await report.save();
+    res.status(201).json({
+      success: true,
+      message:
+        "Report submitted successfully. Our administration team will review it.",
+      report,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 
@@ -1196,6 +1593,7 @@ app.put("/api/resources/:id", authenticateToken, async (req, res) => {
     if (Array.isArray(images) && images.length > 0) resource.images = images;
 
     await resource.save();
+    invalidateResourceCache();
     const populated = await Resource.findOne({ id: req.params.id }).populate(
       "userId",
       "name email avatar",
@@ -1225,6 +1623,7 @@ app.put("/api/resources/:id/mark-sold", authenticateToken, async (req, res) => {
 
     resource.isSold = !resource.isSold;
     await resource.save();
+    invalidateResourceCache();
     res.json({
       message: resource.isSold
         ? "Resource marked as Sold!"
@@ -1250,6 +1649,7 @@ app.delete("/api/resources/:id", authenticateToken, async (req, res) => {
 
     await Resource.findOneAndDelete({ id: req.params.id });
     await Offer.deleteMany({ resourceId: req.params.id });
+    invalidateResourceCache();
 
     res.json({ message: "Resource deleted successfully" });
   } catch (err) {
@@ -1518,29 +1918,91 @@ app.put("/api/offers/:id/status", authenticateToken, async (req, res) => {
 // ========== ADMIN ROUTES ==========
 // ============================================================
 
+// 1. Dashboard Overview Stats & Recent Activity
 app.get(
   "/api/admin/stats",
   authenticateToken,
   requireAdmin,
   async (req, res) => {
     try {
-      const totalUsers = await User.countDocuments();
-      const totalResources = await Resource.countDocuments();
-      const activeListings = await Resource.countDocuments({
-        isSold: false,
-        status: { $ne: "rejected" },
-      });
-      const soldListings = await Resource.countDocuments({ isSold: true });
-      const totalOffers = await Offer.countDocuments();
-      const totalReviews = await Review.countDocuments();
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-      res.json({
+      // Parallelize all count and aggregate queries for near-instant response
+      const [
         totalUsers,
+        newUsersThisMonth,
         totalResources,
+        pendingSubmissions,
+        approvedResources,
+        rejectedResources,
         activeListings,
         soldListings,
         totalOffers,
         totalReviews,
+        pendingReports,
+        verifiedSellers,
+        viewSumResult,
+        recentResources,
+        recentUsers,
+      ] = await Promise.all([
+        User.countDocuments(),
+        User.countDocuments({ createdAt: { $gte: startOfMonth } }),
+        Resource.countDocuments(),
+        Resource.countDocuments({ status: "pending" }),
+        Resource.countDocuments({ status: "approved" }),
+        Resource.countDocuments({ status: "rejected" }),
+        Resource.countDocuments({ isSold: false, status: "approved" }),
+        Resource.countDocuments({ isSold: true }),
+        Offer.countDocuments(),
+        Review.countDocuments(),
+        Report.countDocuments({ status: "pending" }),
+        User.countDocuments({ isVerifiedSeller: true }),
+        Resource.aggregate([
+          {
+            $group: {
+              _id: null,
+              totalViews: { $sum: "$views" },
+              totalDownloads: { $sum: "$downloads" },
+            },
+          },
+        ]),
+        Resource.find()
+          .populate("userId", "name email isVerifiedSeller")
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .select("-images -fileUrl"),
+        User.find()
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .select("-password"),
+      ]);
+
+      const totalViews = viewSumResult.length
+        ? viewSumResult[0].totalViews || 0
+        : 0;
+      const totalDownloads = viewSumResult.length
+        ? viewSumResult[0].totalDownloads || 0
+        : 0;
+
+      res.json({
+        totalUsers,
+        newUsersThisMonth,
+        totalResources,
+        pendingSubmissions,
+        pendingResources: pendingSubmissions,
+        approvedResources,
+        rejectedResources,
+        activeListings,
+        soldListings,
+        totalOffers,
+        totalReviews,
+        totalViews,
+        totalDownloads,
+        pendingReports,
+        verifiedSellers,
+        recentResources,
+        recentUsers,
       });
     } catch (err) {
       res.status(500).json({ message: err.message });
@@ -1548,22 +2010,207 @@ app.get(
   },
 );
 
+// 2. Resource Management Listing with Filtering & Search
 app.get(
   "/api/admin/resources",
   authenticateToken,
   requireAdmin,
   async (req, res) => {
     try {
-      const resources = await Resource.find()
-        .populate("userId", "name email role isBlocked")
-        .sort({ createdAt: -1 });
-      res.json(resources);
+      const {
+        search,
+        status,
+        type,
+        semester,
+        featured,
+        page = 1,
+        limit = 15,
+      } = req.query;
+      const query = {};
+
+      if (status && status !== "all") {
+        query.status = status;
+      }
+      if (type && type !== "all") {
+        query.type = type;
+      }
+      if (semester && semester !== "all") {
+        query.semester = semester;
+      }
+      if (featured && featured !== "all") {
+        query.isFeatured = featured === "true";
+      }
+      if (search && search.trim()) {
+        const q = search.trim();
+        query.$or = [
+          { title: { $regex: q, $options: "i" } },
+          { subject: { $regex: q, $options: "i" } },
+          { description: { $regex: q, $options: "i" } },
+        ];
+      }
+
+      const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+      const total = await Resource.countDocuments(query);
+      const resources = await Resource.find(query)
+        .populate("userId", "name email college isVerifiedSeller")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select("-images");
+
+      res.json({
+        resources,
+        total,
+        page: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)) || 1,
+      });
     } catch (err) {
       res.status(500).json({ message: err.message });
     }
   },
 );
 
+// 3. Admin Direct Resource Creation
+app.post(
+  "/api/admin/resources",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const {
+        title,
+        type,
+        subject,
+        semester,
+        branch,
+        price,
+        condition,
+        description,
+        image,
+        fileUrl,
+        fileName,
+        status,
+        isFeatured,
+      } = req.body;
+
+      if (!title || !type || price === undefined) {
+        return res
+          .status(400)
+          .json({ message: "Title, type, and price are required." });
+      }
+
+      const coverImg =
+        image ||
+        "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=400";
+
+      const newResource = new Resource({
+        id: Date.now().toString(),
+        title: title.trim(),
+        type,
+        subject: subject ? subject.trim() : "General",
+        semester: semester ? semester.trim() : "Semester 1",
+        branch: branch ? branch.trim() : "General",
+        price: Number(price),
+        condition: condition || "Good",
+        description: description ? description.trim() : "",
+        image: coverImg,
+        images: [coverImg],
+        fileUrl: fileUrl || "",
+        fileName: fileName || "",
+        downloads: 0,
+        userId: req.user.id,
+        status: status || "approved",
+        isFeatured: Boolean(isFeatured),
+      });
+
+      const saved = await newResource.save();
+      invalidateResourceCache();
+      res.status(201).json({
+        success: true,
+        message: "Resource created successfully.",
+        resource: saved,
+      });
+    } catch (err) {
+      res.status(400).json({ message: err.message });
+    }
+  },
+);
+
+// 4. Admin Edit Any Resource Details
+app.put(
+  "/api/admin/resources/:id",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const resource = await Resource.findOne({ id: req.params.id });
+      if (!resource)
+        return res.status(404).json({ message: "Resource not found." });
+
+      const fields = [
+        "title",
+        "type",
+        "subject",
+        "semester",
+        "branch",
+        "price",
+        "condition",
+        "description",
+        "image",
+        "fileUrl",
+        "fileName",
+        "status",
+        "isFeatured",
+        "isSold",
+      ];
+
+      fields.forEach((field) => {
+        if (req.body[field] !== undefined) {
+          resource[field] = req.body[field];
+        }
+      });
+
+      if (req.body.image) {
+        resource.images = [req.body.image];
+      }
+
+      await resource.save();
+      invalidateResourceCache();
+      const updated = await Resource.findOne({ id: req.params.id }).populate(
+        "userId",
+        "name email college",
+      );
+      res.json({
+        success: true,
+        message: "Resource updated successfully.",
+        resource: updated,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 5. Admin Delete Resource Permanently
+app.delete(
+  "/api/admin/resources/:id",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const resource = await Resource.findOneAndDelete({ id: req.params.id });
+      if (!resource)
+        return res.status(404).json({ message: "Resource not found." });
+      await Report.deleteMany({ resourceId: req.params.id });
+      invalidateResourceCache();
+      res.json({ success: true, message: "Resource deleted permanently." });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 6. Admin Update Status (Approve / Reject / Pending)
 app.put(
   "/api/admin/resources/:id/status",
   authenticateToken,
@@ -1581,30 +2228,107 @@ app.put(
 
       resource.status = status;
       await resource.save();
+      invalidateResourceCache();
 
-      res.json({ message: `Resource status updated to ${status}`, resource });
+      res.json({
+        success: true,
+        message: `Resource status updated to ${status}`,
+        resource,
+      });
     } catch (err) {
       res.status(500).json({ message: err.message });
     }
   },
 );
 
+// 7. Admin Toggle Featured Status
+app.put(
+  "/api/admin/resources/:id/feature",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const resource = await Resource.findOne({ id: req.params.id });
+      if (!resource)
+        return res.status(404).json({ message: "Resource not found." });
+
+      resource.isFeatured = !resource.isFeatured;
+      await resource.save();
+      invalidateResourceCache();
+
+      res.json({
+        success: true,
+        isFeatured: resource.isFeatured,
+        message: resource.isFeatured
+          ? "Resource marked as Featured."
+          : "Resource removed from Featured.",
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 8. Admin User Management with Search & Resource Counts
 app.get(
   "/api/admin/users",
   authenticateToken,
   requireAdmin,
   async (req, res) => {
     try {
-      const users = await User.find()
+      const { search, role, status, page = 1, limit = 15 } = req.query;
+      const query = {};
+
+      if (role && role !== "all") query.role = role;
+      if (status === "active") query.isBlocked = false;
+      if (status === "blocked") query.isBlocked = true;
+      if (search && search.trim()) {
+        const q = search.trim();
+        query.$or = [
+          { name: { $regex: q, $options: "i" } },
+          { email: { $regex: q, $options: "i" } },
+          { college: { $regex: q, $options: "i" } },
+        ];
+      }
+
+      const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+      const total = await User.countDocuments(query);
+      const users = await User.find(query)
         .select("-password")
-        .sort({ createdAt: -1 });
-      res.json(users);
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean();
+
+      // Count resources for each user
+      const userIds = users.map((u) => u._id);
+      const counts = await Resource.aggregate([
+        { $match: { userId: { $in: userIds } } },
+        { $group: { _id: "$userId", count: { $sum: 1 } } },
+      ]);
+      const countMap = {};
+      counts.forEach((c) => {
+        countMap[c._id.toString()] = c.count;
+      });
+
+      const enrichedUsers = users.map((u) => ({
+        ...u,
+        resourceCount: countMap[u._id.toString()] || 0,
+      }));
+
+      res.json({
+        users: enrichedUsers,
+        total,
+        page: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)) || 1,
+      });
     } catch (err) {
       res.status(500).json({ message: err.message });
     }
   },
 );
 
+// 9. Admin Toggle User Block / Suspension
 app.put(
   "/api/admin/users/:id/block",
   authenticateToken,
@@ -1616,7 +2340,7 @@ app.put(
 
       if (user.role === "admin") {
         return res
-          .status(400)
+          .status(403)
           .json({ message: "Cannot block an administrator." });
       }
 
@@ -1624,9 +2348,10 @@ app.put(
       await user.save();
 
       res.json({
+        success: true,
         message: user.isBlocked
-          ? `User ${user.name} has been blocked.`
-          : `User ${user.name} has been unblocked.`,
+          ? `User ${user.name} has been suspended.`
+          : `User ${user.name} has been reactivated.`,
         isBlocked: user.isBlocked,
       });
     } catch (err) {
@@ -1635,6 +2360,7 @@ app.put(
   },
 );
 
+// 10. Admin Delete User
 app.delete(
   "/api/admin/users/:id",
   authenticateToken,
@@ -1646,7 +2372,7 @@ app.delete(
 
       if (user.role === "admin") {
         return res
-          .status(400)
+          .status(403)
           .json({ message: "Cannot delete an administrator." });
       }
 
@@ -1657,7 +2383,214 @@ app.delete(
       });
 
       res.json({
+        success: true,
         message: "User and associated resources deleted successfully.",
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 11. Admin Moderation Reports Queue
+app.get(
+  "/api/admin/reports",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { status, page = 1, limit = 15 } = req.query;
+      const query = {};
+      if (status && status !== "all") query.status = status;
+
+      const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit);
+      const total = await Report.countDocuments(query);
+      const reports = await Report.find(query)
+        .populate("reporterId", "name email")
+        .populate("resolvedBy", "name email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      res.json({
+        reports,
+        total,
+        page: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)) || 1,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 12. Admin Update Report Status (Resolve / Dismiss)
+app.put(
+  "/api/admin/reports/:id",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { status } = req.body;
+      const report = await Report.findById(req.params.id);
+      if (!report)
+        return res.status(404).json({ message: "Report not found." });
+
+      report.status = status;
+      report.resolvedBy = req.user.id;
+      report.resolvedAt = new Date();
+      await report.save();
+
+      res.json({
+        success: true,
+        message: `Report marked as ${status}.`,
+        report,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 13. Admin Unpublish/Delete Reported Resource & Resolve Report
+app.delete(
+  "/api/admin/reports/:id/resource",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const report = await Report.findById(req.params.id);
+      if (!report)
+        return res.status(404).json({ message: "Report not found." });
+
+      await Resource.findOneAndDelete({ id: report.resourceId });
+      report.status = "resolved";
+      report.resolvedBy = req.user.id;
+      report.resolvedAt = new Date();
+      await report.save();
+
+      res.json({
+        success: true,
+        message: "Reported resource deleted and report resolved.",
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 14. Admin Analytics (Most Popular, Views, Downloads, Growth)
+app.get(
+  "/api/admin/analytics",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const topViewed = await Resource.find({ status: "approved" })
+        .populate("userId", "name college")
+        .sort({ views: -1 })
+        .limit(10)
+        .select(
+          "id title type subject views downloads price condition createdAt userId isFeatured",
+        );
+
+      const topDownloaded = await Resource.find({ status: "approved" })
+        .populate("userId", "name college")
+        .sort({ downloads: -1 })
+        .limit(10)
+        .select(
+          "id title type subject views downloads price condition createdAt userId isFeatured",
+        );
+
+      const topContributors = await Resource.aggregate([
+        { $match: { status: "approved" } },
+        {
+          $group: {
+            _id: "$userId",
+            count: { $sum: 1 },
+            totalViews: { $sum: "$views" },
+            totalDownloads: { $sum: "$downloads" },
+          },
+        },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+        {
+          $lookup: {
+            from: "users",
+            localField: "_id",
+            foreignField: "_id",
+            as: "user",
+          },
+        },
+        { $unwind: "$user" },
+        {
+          $project: {
+            _id: 1,
+            count: 1,
+            totalViews: 1,
+            totalDownloads: 1,
+            "user.name": 1,
+            "user.email": 1,
+            "user.college": 1,
+            "user.isVerifiedSeller": 1,
+          },
+        },
+      ]);
+
+      res.json({
+        topViewed,
+        topDownloaded,
+        topContributors,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+// 15. Admin Platform Settings
+app.get(
+  "/api/admin/settings",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const manualApprovalRequired = await getSetting(
+        "manualApprovalRequired",
+        true,
+      );
+      const maintenanceMode = await getSetting("maintenanceMode", false);
+      res.json({ manualApprovalRequired, maintenanceMode });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  },
+);
+
+app.put(
+  "/api/admin/settings",
+  authenticateToken,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { manualApprovalRequired, maintenanceMode } = req.body;
+      if (manualApprovalRequired !== undefined) {
+        await Setting.findOneAndUpdate(
+          { key: "manualApprovalRequired" },
+          { value: Boolean(manualApprovalRequired) },
+          { upsert: true, new: true },
+        );
+      }
+      if (maintenanceMode !== undefined) {
+        await Setting.findOneAndUpdate(
+          { key: "maintenanceMode" },
+          { value: Boolean(maintenanceMode) },
+          { upsert: true, new: true },
+        );
+      }
+      res.json({
+        success: true,
+        message: "Platform settings updated successfully.",
       });
     } catch (err) {
       res.status(500).json({ message: err.message });
@@ -1848,6 +2781,61 @@ app.get("/api/chat/unread", authenticateToken, async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
+});
+
+// ============================================================
+// ========== AI CHATBOT & RECOMMENDATION ROUTES ==========
+// ============================================================
+
+app.post("/api/ai/recommend", async (req, res) => {
+  try {
+    const { message, conversationHistory, context } = req.body;
+    if (!message || !message.trim()) {
+      return res.status(400).json({ message: "Message cannot be empty." });
+    }
+
+    const allResources = await Resource.find({
+      status: { $ne: "rejected" },
+    }).lean();
+
+    const result = await aiRecommender.processChatbotQuery({
+      message: message.trim(),
+      conversationHistory: conversationHistory || [],
+      currentContext: context || {},
+      allResources,
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error("❌ AI recommendation error:", err.message);
+    res.status(500).json({
+      message: "Error processing recommendation query.",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/ai/suggestions", (req, res) => {
+  res.json({
+    welcomeMessage:
+      "Hi! 👋 I'm EduResourceMine AI. Tell me what you're looking for, and I'll recommend the best study resources for you.",
+    prompts: [
+      "I need ML notes for Semester 3.",
+      "Show me PYQs for AI.",
+      "I have an exam tomorrow. What should I study?",
+      "Recommend beginner-friendly resources for Data Structures.",
+    ],
+  });
+});
+
+// ============================================================
+// ========== STATIC & ROUTING ==========
+// ============================================================
+
+app.use(express.static(path.join(__dirname, "../frontend")));
+
+app.get("/admin", (req, res) => {
+  res.sendFile(path.join(__dirname, "../frontend/index.html"));
 });
 
 // ============================================================
