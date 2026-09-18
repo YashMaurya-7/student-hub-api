@@ -16,7 +16,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: true,
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   },
@@ -28,7 +28,13 @@ app.use(
     origin: true,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+      "x-auth-token",
+    ],
   }),
 );
 
@@ -598,6 +604,23 @@ app.get("/", (req, res) => {
   res.json({
     status: "ok",
     message: "🚀 eduResourceMine API is running!",
+    version: "2.0.0",
+  });
+});
+
+app.get("/api/health", (req, res) => {
+  const dbState = mongoose.connection.readyState;
+  const states = {
+    0: "disconnected",
+    1: "connected",
+    2: "connecting",
+    3: "disconnecting",
+  };
+  res.json({
+    status: "ok",
+    server: "running",
+    database: states[dbState] || "unknown",
+    timestamp: new Date().toISOString(),
     version: "2.0.0",
   });
 });
